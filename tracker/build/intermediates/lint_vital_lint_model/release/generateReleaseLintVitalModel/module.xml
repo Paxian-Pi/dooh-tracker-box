@@ -1,0 +1,19 @@
+<lint-module
+    format="1"
+    dir="/Users/pax/Documents/app/DoohTrackerBox/tracker"
+    name=":tracker"
+    type="LIBRARY"
+    maven="Dooh Tracker Box:tracker:unspecified"
+    agpVersion="8.7.3"
+    buildFolder="build"
+    bootClassPath="/Users/pax/Library/Android/sdk/platforms/android-35/android.jar:/Users/pax/Library/Android/sdk/build-tools/34.0.0/core-lambda-stubs.jar"
+    javaSourceLevel="11"
+    compileTarget="android-35"
+    neverShrinking="true">
+  <lintOptions
+      abortOnError="true"
+      absolutePaths="true"
+      checkReleaseBuilds="true"
+      explainIssues="true"/>
+  <variant name="release"/>
+</lint-module>

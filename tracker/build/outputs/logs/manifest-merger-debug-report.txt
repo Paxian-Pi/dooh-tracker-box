@@ -1,0 +1,40 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml:1:1-14:12
+INJECTED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml:1:1-14:12
+	package
+		INJECTED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml:1:11-69
+uses-permission#android.permission.FOREGROUND_SERVICE
+ADDED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml:2:5-77
+	android:name
+		ADDED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml:2:22-74
+uses-permission#android.permission.FOREGROUND_SERVICE_SPECIAL_USE
+ADDED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml:3:5-89
+	android:name
+		ADDED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml:3:22-86
+application
+ADDED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml:5:5-13:19
+service#com.doohtracker.box.tracker.service.TrackerService
+ADDED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml:6:9-12:19
+	android:exported
+		ADDED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml:9:13-37
+	android:foregroundServiceType
+		ADDED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml:8:13-55
+	android:name
+		ADDED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml:7:13-51
+property#android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE
+ADDED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml:10:13-11:133
+	android:value
+		ADDED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml:11:17-131
+	android:name
+		ADDED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml:10:23-82
+uses-sdk
+INJECTED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml
+INJECTED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /Users/pax/Documents/app/DoohTrackerBox/tracker/src/main/AndroidManifest.xml
