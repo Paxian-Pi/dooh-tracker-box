@@ -3,7 +3,6 @@ package com.doohtracker.box.data.sync
 import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
-import androidx.work.ListenableWorker
 import androidx.work.WorkerParameters
 import com.doohtracker.box.data.repository.CampaignRepository
 import dagger.assisted.Assisted
@@ -20,7 +19,7 @@ class CampaignSyncWorker @AssistedInject constructor(
         return try {
             repository.syncCampaigns()
             Result.success()
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             Result.retry()
         }
     }

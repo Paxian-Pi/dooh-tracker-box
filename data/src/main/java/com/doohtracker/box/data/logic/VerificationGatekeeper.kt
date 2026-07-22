@@ -8,6 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.time.Duration.Companion.milliseconds
 
 @Singleton
 class VerificationGatekeeper @Inject constructor(
@@ -24,7 +25,7 @@ class VerificationGatekeeper @Inject constructor(
     val isTrackingAllowed: Flow<Boolean> = flow {
         while (true) {
             emit(timeProvider.getCurrentTimeMillis())
-            delay(10000) // Re-evaluate time-based campaigns every 10 seconds
+            delay(10000.milliseconds) // Re-evaluate time-based campaigns every 10 seconds
         }
     }.flatMapLatest { currentTime ->
         campaignRepository.getActiveCampaigns(currentTime)
