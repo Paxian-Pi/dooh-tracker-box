@@ -46,7 +46,7 @@ public final class CampaignDao_Impl implements CampaignDao {
       @Override
       @NonNull
       protected String createQuery() {
-        return "INSERT OR REPLACE INTO `campaigns` (`id`,`name`,`campaign`,`campaignTag`,`user`,`startTime`,`endTime`,`mediaUrl`,`syncedCount`,`lastSyncedAt`,`lastHourlyTrackedAt`) VALUES (?,?,?,?,?,?,?,?,?,?,?)";
+        return "INSERT OR REPLACE INTO `campaigns` (`id`,`name`,`campaign`,`campaignTag`,`user`,`startTime`,`endTime`,`mediaUrl`,`mediaType`,`localPath`,`syncedCount`,`lastSyncedAt`,`lastHourlyTrackedAt`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)";
       }
 
       @Override
@@ -64,9 +64,19 @@ public final class CampaignDao_Impl implements CampaignDao {
         } else {
           statement.bindString(8, entity.getMediaUrl());
         }
-        statement.bindLong(9, entity.getSyncedCount());
-        statement.bindLong(10, entity.getLastSyncedAt());
-        statement.bindLong(11, entity.getLastHourlyTrackedAt());
+        if (entity.getMediaType() == null) {
+          statement.bindNull(9);
+        } else {
+          statement.bindString(9, entity.getMediaType());
+        }
+        if (entity.getLocalPath() == null) {
+          statement.bindNull(10);
+        } else {
+          statement.bindString(10, entity.getLocalPath());
+        }
+        statement.bindLong(11, entity.getSyncedCount());
+        statement.bindLong(12, entity.getLastSyncedAt());
+        statement.bindLong(13, entity.getLastHourlyTrackedAt());
       }
     };
     this.__preparedStmtOfDeleteExpiredCampaigns = new SharedSQLiteStatement(__db) {
@@ -243,6 +253,8 @@ public final class CampaignDao_Impl implements CampaignDao {
           final int _cursorIndexOfStartTime = CursorUtil.getColumnIndexOrThrow(_cursor, "startTime");
           final int _cursorIndexOfEndTime = CursorUtil.getColumnIndexOrThrow(_cursor, "endTime");
           final int _cursorIndexOfMediaUrl = CursorUtil.getColumnIndexOrThrow(_cursor, "mediaUrl");
+          final int _cursorIndexOfMediaType = CursorUtil.getColumnIndexOrThrow(_cursor, "mediaType");
+          final int _cursorIndexOfLocalPath = CursorUtil.getColumnIndexOrThrow(_cursor, "localPath");
           final int _cursorIndexOfSyncedCount = CursorUtil.getColumnIndexOrThrow(_cursor, "syncedCount");
           final int _cursorIndexOfLastSyncedAt = CursorUtil.getColumnIndexOrThrow(_cursor, "lastSyncedAt");
           final int _cursorIndexOfLastHourlyTrackedAt = CursorUtil.getColumnIndexOrThrow(_cursor, "lastHourlyTrackedAt");
@@ -269,13 +281,25 @@ public final class CampaignDao_Impl implements CampaignDao {
             } else {
               _tmpMediaUrl = _cursor.getString(_cursorIndexOfMediaUrl);
             }
+            final String _tmpMediaType;
+            if (_cursor.isNull(_cursorIndexOfMediaType)) {
+              _tmpMediaType = null;
+            } else {
+              _tmpMediaType = _cursor.getString(_cursorIndexOfMediaType);
+            }
+            final String _tmpLocalPath;
+            if (_cursor.isNull(_cursorIndexOfLocalPath)) {
+              _tmpLocalPath = null;
+            } else {
+              _tmpLocalPath = _cursor.getString(_cursorIndexOfLocalPath);
+            }
             final int _tmpSyncedCount;
             _tmpSyncedCount = _cursor.getInt(_cursorIndexOfSyncedCount);
             final long _tmpLastSyncedAt;
             _tmpLastSyncedAt = _cursor.getLong(_cursorIndexOfLastSyncedAt);
             final long _tmpLastHourlyTrackedAt;
             _tmpLastHourlyTrackedAt = _cursor.getLong(_cursorIndexOfLastHourlyTrackedAt);
-            _item = new CampaignEntity(_tmpId,_tmpName,_tmpCampaign,_tmpCampaignTag,_tmpUser,_tmpStartTime,_tmpEndTime,_tmpMediaUrl,_tmpSyncedCount,_tmpLastSyncedAt,_tmpLastHourlyTrackedAt);
+            _item = new CampaignEntity(_tmpId,_tmpName,_tmpCampaign,_tmpCampaignTag,_tmpUser,_tmpStartTime,_tmpEndTime,_tmpMediaUrl,_tmpMediaType,_tmpLocalPath,_tmpSyncedCount,_tmpLastSyncedAt,_tmpLastHourlyTrackedAt);
             _result.add(_item);
           }
           return _result;
@@ -313,6 +337,8 @@ public final class CampaignDao_Impl implements CampaignDao {
           final int _cursorIndexOfStartTime = CursorUtil.getColumnIndexOrThrow(_cursor, "startTime");
           final int _cursorIndexOfEndTime = CursorUtil.getColumnIndexOrThrow(_cursor, "endTime");
           final int _cursorIndexOfMediaUrl = CursorUtil.getColumnIndexOrThrow(_cursor, "mediaUrl");
+          final int _cursorIndexOfMediaType = CursorUtil.getColumnIndexOrThrow(_cursor, "mediaType");
+          final int _cursorIndexOfLocalPath = CursorUtil.getColumnIndexOrThrow(_cursor, "localPath");
           final int _cursorIndexOfSyncedCount = CursorUtil.getColumnIndexOrThrow(_cursor, "syncedCount");
           final int _cursorIndexOfLastSyncedAt = CursorUtil.getColumnIndexOrThrow(_cursor, "lastSyncedAt");
           final int _cursorIndexOfLastHourlyTrackedAt = CursorUtil.getColumnIndexOrThrow(_cursor, "lastHourlyTrackedAt");
@@ -339,13 +365,25 @@ public final class CampaignDao_Impl implements CampaignDao {
             } else {
               _tmpMediaUrl = _cursor.getString(_cursorIndexOfMediaUrl);
             }
+            final String _tmpMediaType;
+            if (_cursor.isNull(_cursorIndexOfMediaType)) {
+              _tmpMediaType = null;
+            } else {
+              _tmpMediaType = _cursor.getString(_cursorIndexOfMediaType);
+            }
+            final String _tmpLocalPath;
+            if (_cursor.isNull(_cursorIndexOfLocalPath)) {
+              _tmpLocalPath = null;
+            } else {
+              _tmpLocalPath = _cursor.getString(_cursorIndexOfLocalPath);
+            }
             final int _tmpSyncedCount;
             _tmpSyncedCount = _cursor.getInt(_cursorIndexOfSyncedCount);
             final long _tmpLastSyncedAt;
             _tmpLastSyncedAt = _cursor.getLong(_cursorIndexOfLastSyncedAt);
             final long _tmpLastHourlyTrackedAt;
             _tmpLastHourlyTrackedAt = _cursor.getLong(_cursorIndexOfLastHourlyTrackedAt);
-            _item = new CampaignEntity(_tmpId,_tmpName,_tmpCampaign,_tmpCampaignTag,_tmpUser,_tmpStartTime,_tmpEndTime,_tmpMediaUrl,_tmpSyncedCount,_tmpLastSyncedAt,_tmpLastHourlyTrackedAt);
+            _item = new CampaignEntity(_tmpId,_tmpName,_tmpCampaign,_tmpCampaignTag,_tmpUser,_tmpStartTime,_tmpEndTime,_tmpMediaUrl,_tmpMediaType,_tmpLocalPath,_tmpSyncedCount,_tmpLastSyncedAt,_tmpLastHourlyTrackedAt);
             _result.add(_item);
           }
           return _result;

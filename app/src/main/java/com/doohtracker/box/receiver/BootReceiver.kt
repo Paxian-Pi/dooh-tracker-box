@@ -3,10 +3,13 @@ package com.doohtracker.box.receiver
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
 import com.doohtracker.box.MainActivity
 import com.doohtracker.box.tracker.service.TrackerService
 
 class BootReceiver : BroadcastReceiver() {
+    @OptIn(UnstableApi::class)
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == "android.intent.action.QUICKBOOT_POWERON") {
             

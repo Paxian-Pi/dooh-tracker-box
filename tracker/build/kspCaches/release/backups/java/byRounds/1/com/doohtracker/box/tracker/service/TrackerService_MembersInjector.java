@@ -3,6 +3,8 @@ package com.doohtracker.box.tracker.service;
 import com.doohtracker.box.data.location.LocationMonitor;
 import com.doohtracker.box.data.logic.VerificationGatekeeper;
 import com.doohtracker.box.data.repository.CampaignRepository;
+import com.doohtracker.box.data.time.TimeProvider;
+import com.doohtracker.box.tracker.player.PlaybackManager;
 import dagger.MembersInjector;
 import dagger.internal.DaggerGenerated;
 import dagger.internal.InjectedFieldSignature;
@@ -31,19 +33,27 @@ public final class TrackerService_MembersInjector implements MembersInjector<Tra
 
   private final Provider<LocationMonitor> locationMonitorProvider;
 
+  private final Provider<PlaybackManager> playbackManagerProvider;
+
+  private final Provider<TimeProvider> timeProvider;
+
   public TrackerService_MembersInjector(Provider<VerificationGatekeeper> gatekeeperProvider,
       Provider<CampaignRepository> campaignRepositoryProvider,
-      Provider<LocationMonitor> locationMonitorProvider) {
+      Provider<LocationMonitor> locationMonitorProvider,
+      Provider<PlaybackManager> playbackManagerProvider, Provider<TimeProvider> timeProvider) {
     this.gatekeeperProvider = gatekeeperProvider;
     this.campaignRepositoryProvider = campaignRepositoryProvider;
     this.locationMonitorProvider = locationMonitorProvider;
+    this.playbackManagerProvider = playbackManagerProvider;
+    this.timeProvider = timeProvider;
   }
 
   public static MembersInjector<TrackerService> create(
       Provider<VerificationGatekeeper> gatekeeperProvider,
       Provider<CampaignRepository> campaignRepositoryProvider,
-      Provider<LocationMonitor> locationMonitorProvider) {
-    return new TrackerService_MembersInjector(gatekeeperProvider, campaignRepositoryProvider, locationMonitorProvider);
+      Provider<LocationMonitor> locationMonitorProvider,
+      Provider<PlaybackManager> playbackManagerProvider, Provider<TimeProvider> timeProvider) {
+    return new TrackerService_MembersInjector(gatekeeperProvider, campaignRepositoryProvider, locationMonitorProvider, playbackManagerProvider, timeProvider);
   }
 
   @Override
@@ -51,6 +61,8 @@ public final class TrackerService_MembersInjector implements MembersInjector<Tra
     injectGatekeeper(instance, gatekeeperProvider.get());
     injectCampaignRepository(instance, campaignRepositoryProvider.get());
     injectLocationMonitor(instance, locationMonitorProvider.get());
+    injectPlaybackManager(instance, playbackManagerProvider.get());
+    injectTimeProvider(instance, timeProvider.get());
   }
 
   @InjectedFieldSignature("com.doohtracker.box.tracker.service.TrackerService.gatekeeper")
@@ -68,5 +80,16 @@ public final class TrackerService_MembersInjector implements MembersInjector<Tra
   public static void injectLocationMonitor(TrackerService instance,
       LocationMonitor locationMonitor) {
     instance.locationMonitor = locationMonitor;
+  }
+
+  @InjectedFieldSignature("com.doohtracker.box.tracker.service.TrackerService.playbackManager")
+  public static void injectPlaybackManager(TrackerService instance,
+      PlaybackManager playbackManager) {
+    instance.playbackManager = playbackManager;
+  }
+
+  @InjectedFieldSignature("com.doohtracker.box.tracker.service.TrackerService.timeProvider")
+  public static void injectTimeProvider(TrackerService instance, TimeProvider timeProvider) {
+    instance.timeProvider = timeProvider;
   }
 }

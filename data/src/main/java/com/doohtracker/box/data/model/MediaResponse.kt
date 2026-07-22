@@ -53,7 +53,8 @@ fun MediaResult.toEntity(): CampaignEntity {
         user = user,
         startTime = start,
         endTime = end,
-        mediaUrl = mediaURL
+        mediaUrl = mediaURL,
+        mediaType = mediaType
     )
 }
 

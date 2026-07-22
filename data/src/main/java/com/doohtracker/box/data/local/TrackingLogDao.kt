@@ -14,9 +14,15 @@ interface TrackingLogDao {
     @Update
     suspend fun updateLog(log: TrackingLogEntity)
 
-    @Query("DELETE FROM tracking_logs WHERE isSynced = 1")
-    suspend fun deleteSyncedLogs()
+    @Query("DELETE FROM tracking_logs WHERE isSynced = 1 AND timestamp < :before")
+    suspend fun deleteOldSyncedLogs(before: Long)
 
     @Query("SELECT * FROM tracking_logs ORDER BY timestamp DESC LIMIT 50")
     fun getRecentLogs(): Flow<List<TrackingLogEntity>>
+
+    @Query("SELECT * FROM tracking_logs WHERE timestamp >= :since ORDER BY timestamp ASC")
+    fun getLogsSinceFlow(since: Long): Flow<List<TrackingLogEntity>>
+
+    @Query("SELECT * FROM tracking_logs WHERE timestamp >= :since ORDER BY timestamp ASC")
+    suspend fun getLogsSince(since: Long): List<TrackingLogEntity>
 }

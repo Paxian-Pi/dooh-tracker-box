@@ -9,9 +9,15 @@ import com.doohtracker.box.data.model.SendProofOfPlayRequest
 import com.doohtracker.box.data.model.TrackHourlyRequest
 import com.doohtracker.box.data.model.toEntity
 import com.doohtracker.box.data.remote.CampaignApi
+import com.doohtracker.box.data.remote.MediaDownloader
+import com.doohtracker.box.data.time.TimeProvider
+import com.doohtracker.box.data.util.baseUrl
+import com.doohtracker.box.data.hardware.UsbConnectionMonitor
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import android.util.Log
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
@@ -22,7 +28,10 @@ class CampaignRepository @Inject constructor(
     private val api: CampaignApi,
     private val campaignDao: CampaignDao,
     private val trackingLogDao: TrackingLogDao,
-    private val deviceManager: DeviceManager
+    private val deviceManager: DeviceManager,
+    private val usbMonitor: UsbConnectionMonitor,
+    private val mediaDownloader: MediaDownloader,
+    private val timeProvider: TimeProvider
 ) {
     val allCampaigns: Flow<List<CampaignEntity>> = campaignDao.getAllCampaigns()
     val recentLogs: Flow<List<TrackingLogEntity>> = trackingLogDao.getRecentLogs()
@@ -39,15 +48,21 @@ class CampaignRepository @Inject constructor(
             }
 
             val results = mediaResponse.body()?.results ?: emptyList()
-            
-            // Requirement 1: Match code with campaignTag and user with username
             val isValid = results.any { it.campaignTag == code && it.user == user }
 
             if (isValid) {
                 deviceManager.saveActivationInfo(user, notes)
-                deviceManager.updateLastSyncTime(System.currentTimeMillis())
-                // Store the matched campaigns, resetting counts on first activation
-                campaignDao.insertCampaigns(results.map { it.toEntity() })
+                deviceManager.updateLastSyncTime(timeProvider.getCurrentTimeMillis())
+                
+                // Immediately insert campaign metadata so we can land on dashboard
+                val entities = results.map { it.toEntity().normalizeUrl() }
+                campaignDao.insertCampaigns(entities)
+
+                // Trigger background media download without blocking the UI
+                CoroutineScope(Dispatchers.IO).launch {
+                    syncCampaigns()
+                }
+
                 Result.success(Unit)
             } else {
                 Result.failure(Exception("Invalid Activation Code or Username for this device"))
@@ -60,46 +75,77 @@ class CampaignRepository @Inject constructor(
     fun getActiveCampaigns(currentTime: Long): Flow<List<CampaignEntity>> = 
         campaignDao.getActiveCampaigns(currentTime)
 
+    suspend fun getLogsSince(since: Long): List<TrackingLogEntity> = 
+        trackingLogDao.getLogsSince(since)
+
+    fun getLogsSinceFlow(since: Long): Flow<List<TrackingLogEntity>> = 
+        trackingLogDao.getLogsSinceFlow(since)
+
     suspend fun syncCampaigns() {
         try {
-            Log.d("Sync", "Starting campaign synchronization...")
-            // First try getMedia as requested
             val mediaResponse = api.getMedia()
             if (mediaResponse.isSuccessful) {
-                deviceManager.updateLastSyncTime(System.currentTimeMillis())
+                deviceManager.updateLastSyncTime(timeProvider.getCurrentTimeMillis())
                 val mediaResults = mediaResponse.body()?.results ?: emptyList()
-                Log.d("Sync", "getMedia successful. Found ${mediaResults.size} campaigns.")
                 if (mediaResults.isNotEmpty()) {
                     val existingCampaigns = campaignDao.getAllCampaigns().first()
                     val entities = mediaResults.map { dto ->
-                        val entity = dto.toEntity()
+                        val entity = dto.toEntity().normalizeUrl()
+                        
+                        // Download media if not already present
+                        val localFile = entity.mediaUrl?.let { url ->
+                            mediaDownloader.downloadMedia(url, entity.id)
+                        }
+                        
                         val existing = existingCampaigns.find { it.id == entity.id }
                         if (existing != null) {
-                            entity.copy(syncedCount = existing.syncedCount)
+                            entity.copy(
+                                syncedCount = existing.syncedCount,
+                                localPath = localFile?.absolutePath ?: existing.localPath
+                            )
                         } else {
-                            entity
+                            entity.copy(localPath = localFile?.absolutePath)
                         }
                     }
                     campaignDao.insertCampaigns(entities)
                 }
             }
-            campaignDao.deleteExpiredCampaigns(System.currentTimeMillis())
+            val startOfToday = Calendar.getInstance().apply {
+                timeInMillis = timeProvider.getCurrentTimeMillis()
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            // Keep campaigns that ended today for reporting purposes
+            campaignDao.deleteExpiredCampaigns(startOfToday)
         } catch (e: Exception) {
             Log.e("Sync", "Error during synchronization", e)
         }
     }
 
+    private fun CampaignEntity.normalizeUrl(): CampaignEntity {
+        val url = mediaUrl ?: return this
+        val normalized = if (!url.startsWith("http")) {
+            val domain = baseUrl.substringBefore("/api/").removeSuffix("/")
+            val path = if (url.startsWith("/")) url else "/$url"
+            "$domain$path"
+        } else url
+        
+        // Final sanity check for double slashes in path (excluding protocol)
+        val finalUrl = normalized.replace(Regex("(?<!:)/{2,}"), "/")
+        Log.d("Sync", "Normalized Media URL: $finalUrl")
+        return this.copy(mediaUrl = finalUrl)
+    }
+
     suspend fun trackCurrentCampaigns(currentTime: Long, locationString: String) {
         val activeCampaigns = campaignDao.getActiveCampaigns(currentTime).first()
         val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-        val hourFormat = SimpleDateFormat("HH", Locale.getDefault())
-        val dayFormat = SimpleDateFormat("EEEE", Locale.getDefault())
         val now = Date(currentTime)
+        val hourFormat = SimpleDateFormat("HH", Locale.getDefault())
         val calendar = Calendar.getInstance().apply { time = now }
         val currentHourStr = hourFormat.format(now)
 
-        // Convert to numeric weekday (1 = Monday, ..., 7 = Sunday) as per requirement
         val weekDayNum = when (calendar.get(Calendar.DAY_OF_WEEK)) {
             Calendar.MONDAY -> "1"
             Calendar.TUESDAY -> "2"
@@ -112,38 +158,6 @@ class CampaignRepository @Inject constructor(
         }
 
         activeCampaigns.forEach { campaign ->
-            // 1. Regular Minute-by-Minute Proof of Play
-            val popRequest = SendProofOfPlayRequest(
-                user = campaign.user,
-                campaign = campaign.campaign,
-                campaignTag = campaign.campaignTag,
-                time = timeFormat.format(now),
-                date = dateFormat.format(now),
-                day = dayFormat.format(now),
-                comment = "Auto-tracked from Android Box",
-                location = locationString.ifBlank { deviceManager.getInstallationNotes() },
-                uniqueID = campaign.id,
-                durationCount = 60,
-                confidence = 1.0f
-            )
-
-            Log.d("Tracking", "Sending Proof of Play payload: $popRequest")
-
-            val log = TrackingLogEntity(campaignId = campaign.id, timestamp = currentTime)
-
-            try {
-                val response = api.sendProofOfPlay(popRequest)
-                if (response.isSuccessful) {
-                    trackingLogDao.insertLog(log.copy(isSynced = true))
-                    campaignDao.incrementSyncedCount(campaign.id)
-                } else {
-                    trackingLogDao.insertLog(log.copy(isSynced = false))
-                }
-            } catch (_: Exception) {
-                trackingLogDao.insertLog(log.copy(isSynced = false))
-            }
-
-            // 2. Hourly Tracking (Triggered once per hour)
             val lastTrackedHour = if (campaign.lastHourlyTrackedAt > 0) {
                 hourFormat.format(Date(campaign.lastHourlyTrackedAt))
             } else ""
@@ -155,13 +169,11 @@ class CampaignRepository @Inject constructor(
                     campaignTag = campaign.campaignTag,
                     hours = currentHourStr,
                     date = dateFormat.format(now),
-                    count = campaign.syncedCount + 1, // Current ping included
+                    count = campaign.syncedCount, 
                     weekDay = weekDayNum,
                     location = locationString.ifBlank { deviceManager.getInstallationNotes() },
                     uniqueID = campaign.id
                 )
-
-                Log.d("Tracking", "Sending Hourly Track payload: $hourlyRequest")
 
                 try {
                     val response = api.trackHourly(hourlyRequest)
@@ -175,6 +187,55 @@ class CampaignRepository @Inject constructor(
         }
     }
 
+    suspend fun trackPlayback(campaignId: String, durationSeconds: Long) {
+        // Gate check without circular dependency on VerificationGatekeeper
+        val isHardwareActive = usbMonitor.isUsbDeviceConnected.first()
+        if (!isHardwareActive) {
+            Log.d("Tracking", "Suppressed PoP: HDMI Hardware Inactive")
+            return
+        }
+
+        val campaigns = campaignDao.getAllCampaigns().first()
+        val campaign = campaigns.find { it.id == campaignId } ?: return
+        
+        val currentTime = timeProvider.getCurrentTimeMillis()
+        val now = Date(currentTime)
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+        val dayFormat = SimpleDateFormat("EEEE", Locale.getDefault())
+        
+        val locationString = deviceManager.getInstallationNotes() 
+
+        val request = SendProofOfPlayRequest(
+            user = campaign.user,
+            campaign = campaign.campaign,
+            campaignTag = campaign.campaignTag,
+            time = timeFormat.format(now),
+            date = dateFormat.format(now),
+            day = dayFormat.format(now),
+            comment = "Playback-based tracking",
+            location = locationString,
+            uniqueID = campaign.id,
+            durationCount = durationSeconds,
+            confidence = 1.0f
+        )
+
+        Log.d("Tracking", "Sending Proof of Play: $request")
+
+        val log = TrackingLogEntity(campaignId = campaign.id, timestamp = currentTime)
+        try {
+            val response = api.sendProofOfPlay(request)
+            if (response.isSuccessful) {
+                trackingLogDao.insertLog(log.copy(isSynced = true))
+                campaignDao.incrementSyncedCount(campaign.id)
+            } else {
+                trackingLogDao.insertLog(log.copy(isSynced = false))
+            }
+        } catch (_: Exception) {
+            trackingLogDao.insertLog(log.copy(isSynced = false))
+        }
+    }
+
     suspend fun syncPendingLogs() {
         val unsyncedLogs = trackingLogDao.getUnsyncedLogs()
         val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
@@ -182,7 +243,6 @@ class CampaignRepository @Inject constructor(
         val dayFormat = SimpleDateFormat("EEEE", Locale.getDefault())
 
         unsyncedLogs.forEach { log ->
-            // Re-fetch campaign data to get details
             val campaign = campaignDao.getAllCampaigns().first().find { it.id == log.campaignId }
             if (campaign != null) {
                 val date = Date(log.timestamp)
@@ -193,14 +253,12 @@ class CampaignRepository @Inject constructor(
                     time = timeFormat.format(date),
                     date = dateFormat.format(date),
                     day = dayFormat.format(date),
-                    comment = "Delayed sync from local storage",
+                    comment = "Delayed PoP sync",
                     location = deviceManager.getInstallationNotes(),
                     uniqueID = campaign.id,
-                    durationCount = 60,
+                    durationCount = 0, // Fallback
                     confidence = 1.0f
                 )
-
-                Log.d("Tracking", "Syncing pending Proof of Play payload: $request")
 
                 try {
                     val response = api.sendProofOfPlay(request)
@@ -208,11 +266,10 @@ class CampaignRepository @Inject constructor(
                         trackingLogDao.updateLog(log.copy(isSynced = true))
                         campaignDao.incrementSyncedCount(campaign.id)
                     }
-                } catch (_: Exception) {
-                    // Still offline
-                }
+                } catch (_: Exception) {}
             }
         }
-        trackingLogDao.deleteSyncedLogs()
+        val oneDayAgo = System.currentTimeMillis() - (24 * 60 * 60 * 1000)
+        trackingLogDao.deleteOldSyncedLogs(oneDayAgo)
     }
 }

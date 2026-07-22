@@ -14,6 +14,8 @@ data class CampaignEntity(
     val startTime: Long,
     val endTime: Long,
     val mediaUrl: String?,
+    val mediaType: String? = "video",
+    val localPath: String? = null,
     val syncedCount: Int = 0,
     val lastSyncedAt: Long = System.currentTimeMillis(),
     val lastHourlyTrackedAt: Long = 0L

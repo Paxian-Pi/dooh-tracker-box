@@ -7,15 +7,19 @@ import android.app.Service
 import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.media3.common.util.UnstableApi
 import com.doohtracker.box.data.logic.VerificationGatekeeper
 import com.doohtracker.box.data.repository.CampaignRepository
 import com.doohtracker.box.data.location.LocationMonitor
+import com.doohtracker.box.data.time.TimeProvider
+import com.doohtracker.box.tracker.player.PlaybackManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import kotlin.time.Duration.Companion.milliseconds
 
+@UnstableApi
 @AndroidEntryPoint
 class TrackerService : Service() {
 
@@ -27,6 +31,12 @@ class TrackerService : Service() {
 
     @Inject
     lateinit var locationMonitor: LocationMonitor
+
+    @Inject
+    lateinit var playbackManager: PlaybackManager
+
+    @Inject
+    lateinit var timeProvider: TimeProvider
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var trackingJob: Job? = null
@@ -61,7 +71,7 @@ class TrackerService : Service() {
                 } else ""
 
                 campaignRepository.trackCurrentCampaigns(
-                    currentTime = System.currentTimeMillis(),
+                    currentTime = timeProvider.getCurrentTimeMillis(),
                     locationString = locationString
                 )
                 // Check for new pings every minute

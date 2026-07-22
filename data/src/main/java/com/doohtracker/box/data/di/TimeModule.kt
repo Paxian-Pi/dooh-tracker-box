@@ -1,6 +1,6 @@
 package com.doohtracker.box.data.di
 
-import com.doohtracker.box.data.time.SystemTimeProvider
+import com.doohtracker.box.data.time.NetworkTimeProvider
 import com.doohtracker.box.data.time.TimeProvider
 import dagger.Binds
 import dagger.Module
@@ -15,6 +15,6 @@ abstract class TimeModule {
     @Binds
     @Singleton
     abstract fun bindTimeProvider(
-        impl: SystemTimeProvider
+        impl: NetworkTimeProvider
     ): TimeProvider
 }
