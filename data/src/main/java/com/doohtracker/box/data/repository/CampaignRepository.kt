@@ -39,6 +39,9 @@ class CampaignRepository @Inject constructor(
     fun isDeviceActivated(): Boolean = deviceManager.isActivated()
     fun getInstallationNotes(): String = deviceManager.getInstallationNotes()
     fun getLastSyncTime(): Long = deviceManager.getLastSyncTime()
+    
+    fun isHdmiStreamEnabled(): Boolean = deviceManager.isHdmiStreamEnabled()
+    fun setHdmiStreamEnabled(enabled: Boolean) = deviceManager.setHdmiStreamEnabled(enabled)
 
     suspend fun activateDevice(code: String, user: String, notes: String): Result<Unit> {
         return try {

@@ -1,5 +1,6 @@
 package com.doohtracker.box.ui.dashboard
 
+import android.widget.Toast
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -17,10 +18,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -29,7 +32,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import androidx.tv.material3.*
+import androidx.compose.material3.Switch
 import coil.compose.AsyncImage
+import com.doohtracker.box.ui.dashboard.HdmiPreview
 import com.doohtracker.box.ui.theme.*
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
@@ -52,6 +57,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
     val anyCampaignActive by viewModel.anyCampaignActive.collectAsState()
     val systemHealth by viewModel.systemHealth.collectAsState()
     val currentMediaCampaign by viewModel.playbackManager.currentCampaign.collectAsState()
+    val isHdmiStreamEnabled by viewModel.isHdmiStreamEnabled.collectAsState()
 
     var showExportDialog by remember { mutableStateOf(false) }
 
@@ -59,9 +65,13 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
     val exportButtonFocusRequester = remember { FocusRequester() }
     val scrollState = rememberScrollState()
 
-    Box(modifier = Modifier
-        .fillMaxSize()
-        .background(MaterialTheme.colorScheme.background)) {
+    val context = LocalContext.current
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
@@ -75,12 +85,31 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                     .verticalScroll(scrollState),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    text = "DOOH Tracker Dashboard",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(bottom = 2.dp)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "DOOH Tracker Dashboard",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "HDMI Preview",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (isHdmiStreamEnabled) MaterialTheme.colorScheme.primary else Color.Gray,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        Switch(
+                            checked = isHdmiStreamEnabled,
+                            onCheckedChange = { viewModel.toggleHdmiStream(it) },
+                            modifier = Modifier.scale(0.8f)
+                        )
+                    }
+                }
 
                 // Row 1: Core Connectivity
                 Row(
@@ -133,7 +162,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    if(!anyCampaignActive) {
+                    if (!anyCampaignActive) {
                         val spots by viewModel.dailySpotsSummary.collectAsState()
                         StatusCard(
                             title = "Total Spots Within Campaign Window",
@@ -142,7 +171,11 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             color = StatusCyan,
                             modifier = Modifier.weight(1.5f),
                             isScrolling = true,
-                            onClick = { showExportDialog = true }
+                            onClick = {
+                                if (spots == "No spots today") {
+                                    Toast.makeText(context, "No spots to export today", Toast.LENGTH_LONG).show()
+                                } else showExportDialog = true
+                            }
                         )
                     }
                 }
@@ -217,14 +250,16 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                 ) {
                     val playbackManager = viewModel.playbackManager
                     val campaign = currentMediaCampaign
-                    
+
                     val mediaType = when {
+                        isHdmiActive && isHdmiStreamEnabled -> "hdmi"
                         campaign == null -> "none"
-                        campaign.mediaType?.lowercase() == "image" || 
-                        campaign.mediaUrl?.lowercase()?.let {
-                            it.endsWith(".jpg") || it.endsWith(".jpeg") || 
-                            it.endsWith(".png") || it.endsWith(".webp") 
-                        } == true -> "image"
+                        campaign.mediaType?.lowercase() == "image" ||
+                                campaign.mediaUrl?.lowercase()?.let {
+                                    it.endsWith(".jpg") || it.endsWith(".jpeg") ||
+                                            it.endsWith(".png") || it.endsWith(".webp")
+                                } == true -> "image"
+
                         else -> "video"
                     }
 
@@ -234,6 +269,14 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         label = "TypeTransition"
                     ) { type ->
                         when (type) {
+                            "hdmi" -> {
+                                HdmiPreview(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black)
+                                )
+                            }
+
                             "image" -> {
                                 // Use a nested crossfade for image-to-image transitions
                                 Crossfade(targetState = campaign, label = "ImageTransition") { imgCampaign ->
@@ -248,6 +291,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                     )
                                 }
                             }
+
                             "video" -> {
                                 // For videos, we keep the SAME AndroidView to avoid flashes
                                 AndroidView(
@@ -262,7 +306,8 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                             try {
                                                 val method = javaClass.getMethod("setSurfaceType", Int::class.javaPrimitiveType)
                                                 method.invoke(this, 2) // SURFACE_TYPE_TEXTURE_VIEW
-                                            } catch (e: Exception) {}
+                                            } catch (e: Exception) {
+                                            }
                                             setKeepContentOnPlayerReset(true)
                                             keepScreenOn = true
                                         }
@@ -280,6 +325,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                     }
                                 )
                             }
+
                             else -> {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     val text = if (anyCampaignActive) "Downloading campaigns..." else "No Active Content"
@@ -326,10 +372,14 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                 Surface(
                     shape = MaterialTheme.shapes.medium,
                     colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.wrapContentSize().padding(24.dp)
+                    modifier = Modifier
+                        .wrapContentSize()
+                        .padding(24.dp)
                 ) {
                     Column(
-                        modifier = Modifier.padding(32.dp).widthIn(max = 450.dp),
+                        modifier = Modifier
+                            .padding(32.dp)
+                            .widthIn(max = 450.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
@@ -384,10 +434,14 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                 Surface(
                     shape = MaterialTheme.shapes.medium,
                     colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.wrapContentSize().padding(24.dp)
+                    modifier = Modifier
+                        .wrapContentSize()
+                        .padding(24.dp)
                 ) {
                     Column(
-                        modifier = Modifier.padding(32.dp).widthIn(max = 450.dp),
+                        modifier = Modifier
+                            .padding(32.dp)
+                            .widthIn(max = 450.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
@@ -408,23 +462,23 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             modifier = Modifier.padding(top = 8.dp)
                         ) {
                             Button(
-                                onClick = { 
+                                onClick = {
                                     viewModel.exportCampaignData("csv")
-                                    showExportDialog = false 
+                                    showExportDialog = false
                                 },
                                 modifier = Modifier
                                     .focusRequester(exportButtonFocusRequester)
-                                    .clickable { 
+                                    .clickable {
                                         viewModel.exportCampaignData("csv")
-                                        showExportDialog = false 
+                                        showExportDialog = false
                                     }
                             ) {
                                 Text("CSV")
                             }
                             Button(
-                                onClick = { 
+                                onClick = {
                                     viewModel.exportCampaignData("pdf")
-                                    showExportDialog = false 
+                                    showExportDialog = false
                                 },
                                 modifier = Modifier.clickable {
                                     viewModel.exportCampaignData("pdf")
@@ -456,7 +510,8 @@ fun StatusCard(
     status: String,
     color: Color,
     isScrolling: Boolean = false,
-    onClick: (() -> Unit)? = null
+    onClick: (() -> Unit)? = null,
+    trailing: @Composable (() -> Unit)? = null
 ) {
     Surface(
         onClick = onClick ?: {},
@@ -481,7 +536,8 @@ fun StatusCard(
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = title,
@@ -495,6 +551,7 @@ fun StatusCard(
                         color = Color.Gray
                     )
                 }
+                trailing?.invoke()
             }
 
             Spacer(modifier = Modifier.height(4.dp))

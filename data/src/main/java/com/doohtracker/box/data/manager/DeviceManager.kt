@@ -17,8 +17,15 @@ class DeviceManager @Inject constructor(
     private val KEY_INSTALLATION_NOTES = "installation_notes"
     private val KEY_USERNAME = "username"
     private val KEY_LAST_SYNC_TIME = "last_sync_time"
+    private val KEY_HDMI_STREAM_ENABLED = "hdmi_stream_enabled"
 
     fun isActivated(): Boolean = prefs.getBoolean(KEY_IS_ACTIVATED, false)
+    
+    fun isHdmiStreamEnabled(): Boolean = prefs.getBoolean(KEY_HDMI_STREAM_ENABLED, false)
+
+    fun setHdmiStreamEnabled(enabled: Boolean) {
+        prefs.edit { putBoolean(KEY_HDMI_STREAM_ENABLED, enabled) }
+    }
 
     fun getInstallationNotes(): String = prefs.getString(KEY_INSTALLATION_NOTES, "") ?: ""
     fun getUsername(): String = prefs.getString(KEY_USERNAME, "") ?: ""

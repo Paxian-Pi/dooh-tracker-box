@@ -2,6 +2,7 @@ package com.doohtracker.box.ui.dashboard
 
 import android.content.Context
 import android.location.Geocoder
+import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
@@ -121,6 +122,24 @@ class DashboardViewModel @Inject constructor(
         all.count { it.startTime <= now && it.endTime >= now }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
+    private val _isHdmiStreamEnabled = MutableStateFlow(campaignRepository.isHdmiStreamEnabled())
+    val isHdmiStreamEnabled: StateFlow<Boolean> = _isHdmiStreamEnabled.asStateFlow()
+
+    fun toggleHdmiStream(enabled: Boolean) {
+        if (enabled && !isHdmiActive.value) {
+            viewModelScope.launch {
+                _isHdmiStreamEnabled.value = true
+                Toast.makeText(context, "HDMI Signal is Inactive", android.widget.Toast.LENGTH_SHORT).show()
+                delay(1500.milliseconds)
+                _isHdmiStreamEnabled.value = false
+                campaignRepository.setHdmiStreamEnabled(false)
+            }
+        } else {
+            campaignRepository.setHdmiStreamEnabled(enabled)
+            _isHdmiStreamEnabled.value = enabled
+        }
+    }
+
     val currentCampaignName: StateFlow<String> = combine(
         gatekeeper.isTrackingAllowed,
         campaignRepository.allCampaigns,
@@ -147,7 +166,7 @@ class DashboardViewModel @Inject constructor(
         logs.map { log ->
             val campaign = campaigns.find { it.id == log.campaignId }
             TrackingLogUiModel(
-                title = campaign?.name ?: "Unknown Campaign",
+                title = campaign?.name ?: "Campaign closed",
                 timestamp = log.timestamp,
                 isSynced = log.isSynced
             )
