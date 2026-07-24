@@ -64,6 +64,7 @@ class ActivationViewModel @Inject constructor(
             )
 
             _isLoading.value = false
+
             if (result.isSuccess) {
                 _onActivationSuccess.emit(Unit)
             } else {

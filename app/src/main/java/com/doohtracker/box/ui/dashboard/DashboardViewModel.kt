@@ -5,6 +5,7 @@ import android.location.Geocoder
 import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.util.UnstableApi
 import androidx.work.WorkInfo
 import com.doohtracker.box.data.hardware.UsbConnectionMonitor
 import com.doohtracker.box.data.location.LocationMonitor
@@ -34,7 +35,8 @@ import javax.inject.Inject
 import kotlin.time.Duration.Companion.milliseconds
 
 @HiltViewModel
-class DashboardViewModel @Inject constructor(
+class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
+@Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val campaignRepository: CampaignRepository,
     private val usbConnectionMonitor: UsbConnectionMonitor,
@@ -51,6 +53,9 @@ class DashboardViewModel @Inject constructor(
     private val _showRestartDialog = MutableStateFlow(false)
     val showRestartDialog: StateFlow<Boolean> = _showRestartDialog.asStateFlow()
     private var lastRestartRequestTime = 0L
+
+    private val _onLogoutSuccess = MutableSharedFlow<Unit>()
+    val onLogoutSuccess = _onLogoutSuccess.asSharedFlow()
 
     init {
         usbConnectionMonitor.onNewPermissionGranted
@@ -82,11 +87,22 @@ class DashboardViewModel @Inject constructor(
         systemActions.openDateTimeSettings()
     }
 
+    fun logout() {
+        viewModelScope.launch {
+            campaignRepository.logout()
+            _onLogoutSuccess.emit(Unit)
+        }
+    }
+
     val isHdmiActive: StateFlow<Boolean> = usbConnectionMonitor.isUsbDeviceConnected
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val isConnected: StateFlow<Boolean> = connectivityMonitor.isConnected
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val activationCode: StateFlow<String> = campaignRepository.allCampaigns
+        .map { campaignRepository.getActivationCode() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), campaignRepository.getActivationCode())
 
     val lastSyncTime: StateFlow<String> = flow {
         while (true) {
@@ -121,6 +137,9 @@ class DashboardViewModel @Inject constructor(
     ) { all, now ->
         all.count { it.startTime <= now && it.endTime >= now }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val allCampaignsList: StateFlow<List<com.doohtracker.box.data.local.CampaignEntity>> = campaignRepository.allCampaigns
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _isHdmiStreamEnabled = MutableStateFlow(campaignRepository.isHdmiStreamEnabled())
     val isHdmiStreamEnabled: StateFlow<Boolean> = _isHdmiStreamEnabled.asStateFlow()
@@ -273,10 +292,10 @@ class DashboardViewModel @Inject constructor(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Calculating...")
 
-    fun exportCampaignData(format: String) {
+    fun exportCampaignData(format: String, campaignId: String? = null, searchQuery: String? = null) {
         viewModelScope.launch {
-            val campaigns = campaignRepository.allCampaigns.first()
-
+            val allCampaigns = campaignRepository.allCampaigns.first()
+            
             val today = Calendar.getInstance().apply {
                 timeInMillis = timeProvider.getCurrentTimeMillis()
                 set(Calendar.HOUR_OF_DAY, 0)
@@ -287,12 +306,23 @@ class DashboardViewModel @Inject constructor(
 
             val todayLogs = campaignRepository.getLogsSince(today)
 
-            // Calculate total spots across all campaigns
-            val totalSpots = todayLogs.size
+            // Filter campaigns based on user selection
+            val filteredCampaigns = when {
+                campaignId != null -> allCampaigns.filter { it.id == campaignId }
+                !searchQuery.isNullOrBlank() && searchQuery != "All Campaigns" -> 
+                    allCampaigns.filter { it.name.contains(searchQuery, ignoreCase = true) }
+                else -> allCampaigns
+            }
+            
+            val filteredCampaignIds = filteredCampaigns.map { it.id }.toSet()
+            val filteredLogs = todayLogs.filter { it.campaignId in filteredCampaignIds }
+
+            // Calculate total spots for the filtered set
+            val totalSpots = filteredLogs.size
 
             // Aggregation for summary
-            val summaryData = campaigns.mapNotNull { campaign ->
-                val count = todayLogs.count { it.campaignId == campaign.id }
+            val summaryData = filteredCampaigns.mapNotNull { campaign ->
+                val count = filteredLogs.count { it.campaignId == campaign.id }
                 if (count > 0) {
                     Triple(campaign.campaignTag, campaign.name, count.toString())
                 } else null
@@ -301,6 +331,12 @@ class DashboardViewModel @Inject constructor(
             val timestamp = timeProvider.getCurrentTimeMillis()
             val sdfDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
             val sdfTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+            
+            val reportSuffix = when {
+                campaignId != null -> "_campaign_${campaignId}"
+                !searchQuery.isNullOrBlank() -> "_search_${searchQuery.replace(" ", "_")}"
+                else -> "_all"
+            }
 
             if (format.lowercase() == "csv") {
                 val csvBuilder = StringBuilder()
@@ -320,8 +356,8 @@ class DashboardViewModel @Inject constructor(
                 csvBuilder.append("PLAYBACK LOG\n")
                 csvBuilder.append("Campaign Tag,Campaign Title,Spots,Date,Time\n")
 
-                todayLogs.forEach { log ->
-                    val campaign = campaigns.find { it.id == log.campaignId }
+                filteredLogs.forEach { log ->
+                    val campaign = allCampaigns.find { it.id == log.campaignId }
                     if (campaign != null) {
                         val date = Date(log.timestamp)
                         csvBuilder.append("${campaign.campaignTag},")
@@ -331,7 +367,7 @@ class DashboardViewModel @Inject constructor(
                         csvBuilder.append("${sdfTime.format(date)}\n")
                     }
                 }
-                systemActions.saveCsvFile("campaign_compliance_report_$timestamp.csv", csvBuilder.toString())
+                systemActions.saveCsvFile("campaign_compliance_report${reportSuffix}_$timestamp.csv", csvBuilder.toString())
             } else if (format.lowercase() == "pdf") {
                 val sections = mutableListOf<PdfSection>()
 
@@ -358,8 +394,8 @@ class DashboardViewModel @Inject constructor(
                     PdfSection(
                         title = "Playback Log",
                         headers = listOf("Campaign Tag", "Title", "Spots", "Date", "Time"),
-                        rows = todayLogs.mapNotNull { log ->
-                            val campaign = campaigns.find { it.id == log.campaignId }
+                        rows = filteredLogs.mapNotNull { log ->
+                            val campaign = allCampaigns.find { it.id == log.campaignId }
                             if (campaign != null) {
                                 val date = Date(log.timestamp)
                                 listOf(
@@ -375,7 +411,7 @@ class DashboardViewModel @Inject constructor(
                 )
 
                 systemActions.savePdfFile(
-                    "campaign_compliance_report_$timestamp.pdf",
+                    "campaign_compliance_report${reportSuffix}_$timestamp.pdf",
                     "Campaign Compliance Report - ${sdfDate.format(Date(timestamp))}",
                     sections
                 )

@@ -25,4 +25,7 @@ interface TrackingLogDao {
 
     @Query("SELECT * FROM tracking_logs WHERE timestamp >= :since ORDER BY timestamp ASC")
     suspend fun getLogsSince(since: Long): List<TrackingLogEntity>
+
+    @Query("DELETE FROM tracking_logs")
+    suspend fun clearAll()
 }

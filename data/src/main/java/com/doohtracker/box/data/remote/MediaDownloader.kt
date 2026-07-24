@@ -14,7 +14,7 @@ import javax.inject.Singleton
 
 @Singleton
 class MediaDownloader @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val okHttpClient: OkHttpClient
 ) {
     private val mediaDir = File(context.filesDir, "media").apply { mkdirs() }
@@ -59,6 +59,14 @@ class MediaDownloader @Inject constructor(
             url.contains(".png", true) -> ".png"
             url.contains(".webp", true) -> ".webp"
             else -> ""
+        }
+    }
+
+    fun clearMedia() {
+        try {
+            mediaDir.listFiles()?.forEach { it.delete() }
+        } catch (e: Exception) {
+            Log.e("Download", "Error clearing media", e)
         }
     }
 }

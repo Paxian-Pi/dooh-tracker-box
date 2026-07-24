@@ -10,12 +10,13 @@ import androidx.core.content.edit
 
 @Singleton
 class DeviceManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context
 ) {
     private val prefs = context.getSharedPreferences("device_prefs", Context.MODE_PRIVATE)
     private val KEY_IS_ACTIVATED = "is_activated"
     private val KEY_INSTALLATION_NOTES = "installation_notes"
     private val KEY_USERNAME = "username"
+    private val KEY_ACTIVATION_CODE = "activation_code"
     private val KEY_LAST_SYNC_TIME = "last_sync_time"
     private val KEY_HDMI_STREAM_ENABLED = "hdmi_stream_enabled"
 
@@ -29,6 +30,7 @@ class DeviceManager @Inject constructor(
 
     fun getInstallationNotes(): String = prefs.getString(KEY_INSTALLATION_NOTES, "") ?: ""
     fun getUsername(): String = prefs.getString(KEY_USERNAME, "") ?: ""
+    fun getActivationCode(): String = prefs.getString(KEY_ACTIVATION_CODE, "") ?: ""
 
     fun getLastSyncTime(): Long = prefs.getLong(KEY_LAST_SYNC_TIME, 0L)
 
@@ -36,10 +38,11 @@ class DeviceManager @Inject constructor(
         prefs.edit { putLong(KEY_LAST_SYNC_TIME, time) }
     }
 
-    fun saveActivationInfo(username: String, notes: String) {
+    fun saveActivationInfo(username: String, activationCode: String, notes: String) {
         prefs.edit {
             putBoolean(KEY_IS_ACTIVATED, true)
             putString(KEY_USERNAME, username)
+            putString(KEY_ACTIVATION_CODE, activationCode)
             putString(KEY_INSTALLATION_NOTES, notes)
         }
     }
@@ -47,5 +50,9 @@ class DeviceManager @Inject constructor(
     @SuppressLint("HardwareIds")
     fun getDeviceId(): String {
         return Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: "unknown_id"
+    }
+
+    fun logout() {
+        prefs.edit { clear() }
     }
 }

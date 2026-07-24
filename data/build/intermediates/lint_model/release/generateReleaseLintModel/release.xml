@@ -27,6 +27,6 @@
       applicationId="com.doohtracker.box.data"
       generatedSourceFolders="build/generated/ksp/release/java:build/generated/ksp/release/kotlin:build/generated/ap_generated_sources/release/out"
       generatedResourceFolders="build/generated/res/resValues/release"
-      desugaredMethodsFiles="/Users/pax/.gradle/caches/9.4.1/transforms/057a36d6eb185130ea24a62f9759a9f0/transformed/D8BackportedDesugaredMethods.txt">
+      desugaredMethodsFiles="/Users/pax/.gradle/caches/9.4.1/transforms/896c61036a622d41b1e5a9e023556575/transformed/D8BackportedDesugaredMethods.txt">
   </artifact>
 </variant>

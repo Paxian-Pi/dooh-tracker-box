@@ -1,5 +1,6 @@
 package com.doohtracker.box
 
+import android.content.pm.ActivityInfo
 import android.content.Intent
 import android.hardware.usb.UsbManager
 import android.os.Bundle
@@ -25,6 +26,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.util.UnstableApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.seconds
@@ -49,6 +51,7 @@ class MainActivity : ComponentActivity() {
         usbConnectionMonitor.triggerCheck()
     }
 
+    @androidx.annotation.OptIn(UnstableApi::class)
     @OptIn(ExperimentalTvMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -82,12 +85,29 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             DoohTrackerBoxTheme {
+                // Handle orientation based on activation state
+                LaunchedEffect(isActivated) {
+                    requestedOrientation = if (isActivated) {
+                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    } else {
+                        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    }
+                }
+
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     shape = RectangleShape
                 ) {
                     if (isActivated) {
                         val viewModel: DashboardViewModel = hiltViewModel()
+                        LaunchedEffect(viewModel) {
+                            viewModel.onLogoutSuccess.collect {
+                                // Restart activity with a fresh intent to clear all ViewModel stores
+                                val freshIntent = Intent(this@MainActivity, MainActivity::class.java)
+                                finish()
+                                startActivity(freshIntent)
+                            }
+                        }
                         DashboardScreen(viewModel)
                     } else {
                         val viewModel: ActivationViewModel = hiltViewModel()

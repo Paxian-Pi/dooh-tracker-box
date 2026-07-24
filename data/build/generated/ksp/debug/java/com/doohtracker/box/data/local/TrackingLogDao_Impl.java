@@ -38,6 +38,8 @@ public final class TrackingLogDao_Impl implements TrackingLogDao {
 
   private final SharedSQLiteStatement __preparedStmtOfDeleteOldSyncedLogs;
 
+  private final SharedSQLiteStatement __preparedStmtOfClearAll;
+
   public TrackingLogDao_Impl(@NonNull final RoomDatabase __db) {
     this.__db = __db;
     this.__insertionAdapterOfTrackingLogEntity = new EntityInsertionAdapter<TrackingLogEntity>(__db) {
@@ -80,6 +82,14 @@ public final class TrackingLogDao_Impl implements TrackingLogDao {
       @NonNull
       public String createQuery() {
         final String _query = "DELETE FROM tracking_logs WHERE isSynced = 1 AND timestamp < ?";
+        return _query;
+      }
+    };
+    this.__preparedStmtOfClearAll = new SharedSQLiteStatement(__db) {
+      @Override
+      @NonNull
+      public String createQuery() {
+        final String _query = "DELETE FROM tracking_logs";
         return _query;
       }
     };
@@ -144,6 +154,29 @@ public final class TrackingLogDao_Impl implements TrackingLogDao {
           }
         } finally {
           __preparedStmtOfDeleteOldSyncedLogs.release(_stmt);
+        }
+      }
+    }, $completion);
+  }
+
+  @Override
+  public Object clearAll(final Continuation<? super Unit> $completion) {
+    return CoroutinesRoom.execute(__db, true, new Callable<Unit>() {
+      @Override
+      @NonNull
+      public Unit call() throws Exception {
+        final SupportSQLiteStatement _stmt = __preparedStmtOfClearAll.acquire();
+        try {
+          __db.beginTransaction();
+          try {
+            _stmt.executeUpdateDelete();
+            __db.setTransactionSuccessful();
+            return Unit.INSTANCE;
+          } finally {
+            __db.endTransaction();
+          }
+        } finally {
+          __preparedStmtOfClearAll.release(_stmt);
         }
       }
     }, $completion);

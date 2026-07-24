@@ -37,6 +37,7 @@ class CampaignRepository @Inject constructor(
     val recentLogs: Flow<List<TrackingLogEntity>> = trackingLogDao.getRecentLogs()
 
     fun isDeviceActivated(): Boolean = deviceManager.isActivated()
+    fun getActivationCode(): String = deviceManager.getActivationCode()
     fun getInstallationNotes(): String = deviceManager.getInstallationNotes()
     fun getLastSyncTime(): Long = deviceManager.getLastSyncTime()
     
@@ -51,14 +52,16 @@ class CampaignRepository @Inject constructor(
             }
 
             val results = mediaResponse.body()?.results ?: emptyList()
-            val isValid = results.any { it.campaignTag == code && it.user == user }
+            
+            // Filter results where campaignTag matches activationCode AND user matches username
+            val matchedCampaigns = results.filter { it.campaignTag == code && it.user == user }
 
-            if (isValid) {
-                deviceManager.saveActivationInfo(user, notes)
+            if (matchedCampaigns.isNotEmpty()) {
+                deviceManager.saveActivationInfo(user, code, notes)
                 deviceManager.updateLastSyncTime(timeProvider.getCurrentTimeMillis())
                 
-                // Immediately insert campaign metadata so we can land on dashboard
-                val entities = results.map { it.toEntity().normalizeUrl() }
+                // Immediately insert matched campaign metadata
+                val entities = matchedCampaigns.map { it.toEntity().normalizeUrl() }
                 campaignDao.insertCampaigns(entities)
 
                 // Trigger background media download without blocking the UI
@@ -90,9 +93,15 @@ class CampaignRepository @Inject constructor(
             if (mediaResponse.isSuccessful) {
                 deviceManager.updateLastSyncTime(timeProvider.getCurrentTimeMillis())
                 val mediaResults = mediaResponse.body()?.results ?: emptyList()
-                if (mediaResults.isNotEmpty()) {
+                
+                // Filter by stored credentials
+                val code = deviceManager.getActivationCode()
+                val user = deviceManager.getUsername()
+                val matchedResults = mediaResults.filter { it.campaignTag == code && it.user == user }
+
+                if (matchedResults.isNotEmpty()) {
                     val existingCampaigns = campaignDao.getAllCampaigns().first()
-                    val entities = mediaResults.map { dto ->
+                    val entities = matchedResults.map { dto ->
                         val entity = dto.toEntity().normalizeUrl()
                         
                         // Download media if not already present
@@ -274,5 +283,12 @@ class CampaignRepository @Inject constructor(
         }
         val oneDayAgo = System.currentTimeMillis() - (24 * 60 * 60 * 1000)
         trackingLogDao.deleteOldSyncedLogs(oneDayAgo)
+    }
+
+    suspend fun logout() {
+        deviceManager.logout()
+        campaignDao.clearAll()
+        trackingLogDao.clearAll()
+        mediaDownloader.clearMedia()
     }
 }

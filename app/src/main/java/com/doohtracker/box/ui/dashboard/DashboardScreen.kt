@@ -5,17 +5,43 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Switch
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -24,21 +50,30 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
-import androidx.tv.material3.*
-import androidx.compose.material3.Switch
+import androidx.tv.material3.Button
+import androidx.tv.material3.ButtonDefaults
+import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.ExperimentalTvMaterial3Api
+import androidx.tv.material3.Icon
+import androidx.tv.material3.MaterialTheme
+import androidx.tv.material3.Surface
+import androidx.tv.material3.SurfaceDefaults
+import androidx.tv.material3.Text
 import coil.compose.AsyncImage
-import com.doohtracker.box.ui.dashboard.HdmiPreview
-import com.doohtracker.box.ui.theme.*
+import com.doohtracker.box.ui.theme.StatusCyan
+import com.doohtracker.box.ui.theme.StatusGreen
+import com.doohtracker.box.ui.theme.StatusRed
+import com.doohtracker.box.ui.theme.StatusYellow
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
 import kotlin.time.Duration.Companion.milliseconds
 
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -58,10 +93,13 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
     val systemHealth by viewModel.systemHealth.collectAsState()
     val currentMediaCampaign by viewModel.playbackManager.currentCampaign.collectAsState()
     val isHdmiStreamEnabled by viewModel.isHdmiStreamEnabled.collectAsState()
+    val siteId by viewModel.activationCode.collectAsState()
 
     var showExportDialog by remember { mutableStateOf(false) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
 
     val restartButtonFocusRequester = remember { FocusRequester() }
+    val logoutButtonFocusRequester = remember { FocusRequester() }
     val exportButtonFocusRequester = remember { FocusRequester() }
     val scrollState = rememberScrollState()
 
@@ -72,203 +110,224 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp)
-        ) {
-            // Left Column: Status Grid
-            Column(
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(
                 modifier = Modifier
-                    .weight(1.8f)
-                    .fillMaxHeight()
-                    .verticalScroll(scrollState),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .weight(1f)
+                    .padding(24.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "DOOH Tracker Dashboard",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "HDMI Preview",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (isHdmiStreamEnabled) MaterialTheme.colorScheme.primary else Color.Gray,
-                            modifier = Modifier.padding(end = 8.dp)
-                        )
-                        Switch(
-                            checked = isHdmiStreamEnabled,
-                            onCheckedChange = { viewModel.toggleHdmiStream(it) },
-                            modifier = Modifier.scale(0.8f)
-                        )
-                    }
-                }
-
-                // Row 1: Core Connectivity
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    StatusCard(
-                        title = "HDMI Signal",
-                        status = if (isHdmiActive) "Active" else "Inactive",
-                        color = if (isHdmiActive) StatusGreen else StatusRed,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    StatusCard(
-                        title = "Internet",
-                        status = if (isConnected) "Online" else "Offline",
-                        color = if (isConnected) StatusGreen else StatusRed,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    StatusCard(
-                        title = "Internal IP",
-                        status = systemHealth?.ipAddress ?: "Checking...",
-                        color = Color.White,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                // Row 2: Campaign Status
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    StatusCard(
-                        title = "Current Campaign",
-                        status = currentCampaign,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(2f),
-                        isScrolling = true
-                    )
-
-                    StatusCard(
-                        title = "Downloaded",
-                        status = "$campaignCount ($syncStatus)",
-                        color = if (campaignCount > 0) StatusCyan else Color.Gray,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    if (!anyCampaignActive) {
-                        val spots by viewModel.dailySpotsSummary.collectAsState()
-                        StatusCard(
-                            title = "Total Spots Within Campaign Window",
-                            info = "Export to PDF/CSV",
-                            status = spots,
-                            color = StatusCyan,
-                            modifier = Modifier.weight(1.5f),
-                            isScrolling = true,
-                            onClick = {
-                                if (spots == "No spots today") {
-                                    Toast.makeText(context, "No spots to export today", Toast.LENGTH_LONG).show()
-                                } else showExportDialog = true
-                            }
-                        )
-                    }
-                }
-
-                // Row 3: Location and Sync/Spots
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    StatusCard(
-                        title = "Device Location",
-                        status = location,
-                        color = if (location.contains("Disabled")) StatusRed else StatusYellow,
-                        modifier = Modifier.weight(2f),
-                        onClick = { viewModel.openLocationSettings() }
-                    )
-
-                    if (!anyCampaignActive) {
-                        StatusCard(
-                            title = "Last Sync",
-                            status = lastSyncTime,
-                            color = StatusCyan,
-                            modifier = Modifier.weight(1f),
-                            onClick = { viewModel.openDateTimeSettings() }
-                        )
-                    }
-                }
-
-                // Row 4: System Health
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    StatusCard(
-                        title = "RAM",
-                        status = systemHealth?.ramUsage ?: "Checking...",
-                        color = Color.White,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    StatusCard(
-                        title = "Storage",
-                        status = systemHealth?.storageUsage ?: "Checking...",
-                        color = Color.White,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    StatusCard(
-                        title = "Uptime",
-                        status = systemHealth?.uptime ?: "Checking...",
-                        color = Color.White,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(32.dp))
-
-            // Right Column: Player and Logs
-            Column(
-                modifier = Modifier
-                    .weight(1.2f)
-                    .fillMaxHeight()
-            ) {
-                Box(
+                // Left Column: Status Grid
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp)
-                        .padding(bottom = 16.dp)
-                        .background(Color.Black, shape = RoundedCornerShape(20.dp))
-                        .clip(RoundedCornerShape(20.dp))
+                        .weight(1.8f)
+                        .fillMaxHeight()
+                        .verticalScroll(scrollState),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    val playbackManager = viewModel.playbackManager
-                    val campaign = currentMediaCampaign
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "DOOH Tracker Dashboard",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
 
-                    val mediaType = when {
-                        isHdmiActive && isHdmiStreamEnabled -> "hdmi"
-                        campaign == null -> "none"
-                        campaign.mediaType?.lowercase() == "image" ||
-                                campaign.mediaUrl?.lowercase()?.let {
-                                    it.endsWith(".jpg") || it.endsWith(".jpeg") ||
-                                            it.endsWith(".png") || it.endsWith(".webp")
-                                } == true -> "image"
-
-                        else -> "video"
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "HDMI Preview",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (isHdmiStreamEnabled) MaterialTheme.colorScheme.primary else Color.Gray,
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                            Switch(
+                                checked = isHdmiStreamEnabled,
+                                onCheckedChange = { viewModel.toggleHdmiStream(it) },
+                                modifier = Modifier.scale(0.8f)
+                            )
+                        }
                     }
 
-                    Crossfade(
-                        targetState = mediaType,
-                        animationSpec = tween(1000),
-                        label = "TypeTransition"
-                    ) { type ->
-                        when (type) {
+                    // Row 1: Core Connectivity
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        StatusCard(
+                            title = "HDMI Signal",
+                            status = if (isHdmiActive) "Active" else "Inactive",
+                            color = if (isHdmiActive) StatusGreen else StatusRed,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        StatusCard(
+                            title = "Internet",
+                            status = if (isConnected) "Online" else "Offline",
+                            color = if (isConnected) StatusGreen else StatusRed,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        StatusCard(
+                            title = "Site ID",
+                            status = siteId,
+                            color = Color.White,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    // Row 2: Campaign Status
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        StatusCard(
+                            title = "Current Campaign",
+                            status = currentCampaign,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(2f),
+                            isScrolling = true
+                        )
+
+                        StatusCard(
+                            title = "Downloaded",
+                            status = "$campaignCount ($syncStatus)",
+                            color = if (campaignCount > 0) StatusCyan else Color.Gray,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        if (!anyCampaignActive) {
+                            val spots by viewModel.dailySpotsSummary.collectAsState()
+                            StatusCard(
+                                title = "Total Spots Within Campaign Window",
+                                info = "Export to PDF/CSV",
+                                status = spots,
+                                color = StatusCyan,
+                                modifier = Modifier.weight(1.5f),
+                                isScrolling = true,
+                                onClick = {
+                                    if (spots == "No spots today") {
+                                        Toast.makeText(context, "No spots to export today", Toast.LENGTH_LONG).show()
+                                    } else showExportDialog = true
+                                }
+                            )
+                        }
+                    }
+
+                    // Row 3: Location and Sync/Spots
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        StatusCard(
+                            title = "Device Location",
+                            status = location,
+                            color = if (location.contains("Disabled")) StatusRed else StatusYellow,
+                            modifier = Modifier.weight(2f),
+                            onClick = { viewModel.openLocationSettings() }
+                        )
+
+                        if (!anyCampaignActive) {
+                            StatusCard(
+                                title = "Last Sync",
+                                status = lastSyncTime,
+                                color = StatusCyan,
+                                modifier = Modifier.weight(1f),
+                                onClick = { viewModel.openDateTimeSettings() }
+                            )
+                        }
+                    }
+
+                    // Row 4: System Health
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        StatusCard(
+                            title = "RAM",
+                            status = systemHealth?.ramUsage ?: "Checking...",
+                            color = Color.White,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        StatusCard(
+                            title = "Storage",
+                            status = systemHealth?.storageUsage ?: "Checking...",
+                            color = Color.White,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        StatusCard(
+                            title = "Uptime",
+                            status = systemHealth?.uptime ?: "Checking...",
+                            color = Color.White,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    if(!anyCampaignActive) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Button(
+                                onClick = { showLogoutDialog = true },
+                                colors = ButtonDefaults.colors(
+                                    containerColor = Color.Black,
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier
+                                    .scale(0.9f)
+                                    .clickable { showLogoutDialog = true }
+                                    .background(Color.Black, shape = RoundedCornerShape(10.dp))
+                            ) {
+                                Text(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), text = "Re-activate Device")
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(32.dp))
+
+                // Right Column: Player and Logs
+                Column(
+                    modifier = Modifier
+                        .weight(1.2f)
+                        .fillMaxHeight()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                            .padding(bottom = 16.dp)
+                            .background(Color.Black, shape = RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(20.dp))
+                    ) {
+                        val playbackManager = viewModel.playbackManager
+                        val campaign = currentMediaCampaign
+
+                        val mediaType = when {
+                            isHdmiActive && isHdmiStreamEnabled -> "hdmi"
+                            campaign == null -> "none"
+                            campaign.mediaType?.lowercase() == "image" ||
+                                    campaign.mediaUrl?.lowercase()?.let {
+                                        it.endsWith(".jpg") || it.endsWith(".jpeg") ||
+                                                it.endsWith(".png") || it.endsWith(".webp")
+                                    } == true -> "image"
+
+                            else -> "video"
+                        }
+
+                        when (mediaType) {
                             "hdmi" -> {
                                 HdmiPreview(
                                     modifier = Modifier
@@ -334,25 +393,99 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             }
                         }
                     }
-                }
 
-                Text(
-                    text = "Audit Trail",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-
-                Surface(
-                    onClick = {},
-                    modifier = Modifier.weight(1f),
-                    shape = ClickableSurfaceDefaults.shape(RectangleShape),
-                    colors = ClickableSurfaceDefaults.colors(
-                        containerColor = Color(0xFF1E2136),
-                        contentColor = Color.White
+                    Text(
+                        text = "Audit Trail",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 8.dp)
                     )
+
+                    Surface(
+                        onClick = { showLogoutDialog = true },
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { showLogoutDialog = true },
+                        shape = ClickableSurfaceDefaults.shape(RectangleShape),
+                        colors = ClickableSurfaceDefaults.colors(
+                            containerColor = Color(0xFF1E2136),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        LogsList(logs)
+                    }
+                }
+            }
+        }
+
+        // Custom Logout Dialog Overlay
+        if (showLogoutDialog) {
+            LaunchedEffect(Unit) {
+                logoutButtonFocusRequester.requestFocus()
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.85f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier
+                        .wrapContentSize()
+                        .padding(24.dp)
                 ) {
-                    LogsList(logs)
+                    Column(
+                        modifier = Modifier
+                            .padding(32.dp)
+                            .widthIn(max = 450.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text(
+                            text = "Re-activate Device?",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            text = "This will wipe all device credentials, delete downloaded campaigns, and clear all logs. You will need to reactivate the device.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    viewModel.logout()
+                                    showLogoutDialog = false
+                                },
+                                colors = ButtonDefaults.colors(
+                                    containerColor = Color.Black,
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier
+                                    .focusRequester(logoutButtonFocusRequester)
+                                    .clickable {
+                                        viewModel.logout()
+                                        showLogoutDialog = false
+                                    }
+                            ) {
+                                Text("Logout & Wipe")
+                            }
+                            Button(
+                                onClick = { showLogoutDialog = false },
+                                modifier = Modifier.clickable { showLogoutDialog = false }
+                            ) {
+                                Text("Cancel")
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -421,6 +554,16 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
 
         // Custom Export Dialog Overlay
         if (showExportDialog) {
+            val allCampaigns by viewModel.allCampaignsList.collectAsState()
+            var searchQuery by remember { mutableStateOf("") }
+            var selectedCampaignId by remember { mutableStateOf<String?>(null) }
+            var dropdownExpanded by remember { mutableStateOf(false) }
+
+            val filteredCampaigns = remember(searchQuery, allCampaigns) {
+                if (searchQuery.isBlank()) allCampaigns
+                else allCampaigns.filter { it.name.contains(searchQuery, ignoreCase = true) }
+            }
+
             LaunchedEffect(Unit) {
                 exportButtonFocusRequester.requestFocus()
             }
@@ -436,56 +579,134 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                     colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
                     modifier = Modifier
                         .wrapContentSize()
+                        .widthIn(max = 500.dp)
                         .padding(24.dp)
                 ) {
                     Column(
-                        modifier = Modifier
-                            .padding(32.dp)
-                            .widthIn(max = 450.dp),
+                        modifier = Modifier.padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         Text(
-                            text = "Export Report",
+                            text = "Export Campaign Report",
                             style = MaterialTheme.typography.headlineMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                             textAlign = TextAlign.Center
                         )
-                        Text(
-                            text = "Select format for the daily spots report:",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
+
+                        // Search Field
+                        TextField(
+                            value = searchQuery,
+                            onValueChange = {
+                                searchQuery = it
+                                selectedCampaignId = null // Clear ID if user types to allow variant search
+                            },
+                            label = { Text("Search Campaigns...") },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color(0xFF1E2136),
+                                unfocusedContainerColor = Color(0xFF1E2136),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            trailingIcon = {
+                                androidx.compose.material3.IconButton(onClick = { dropdownExpanded = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowDropDown,
+                                        contentDescription = "Dropdown",
+                                        tint = Color.White
+                                    )
+                                }
+                            }
                         )
+
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                Button(
+                                    onClick = { dropdownExpanded = true },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Select from List")
+                                }
+                                DropdownMenu(
+                                    expanded = dropdownExpanded,
+                                    onDismissRequest = { dropdownExpanded = false },
+                                    modifier = Modifier
+                                        .width(300.dp)
+                                        .background(Color(0xFF1E2136))
+                                ) {
+                                    filteredCampaigns.forEach { campaign ->
+                                        DropdownMenuItem(
+                                            text = { Text(campaign.name, color = Color.White) },
+                                            onClick = {
+                                                selectedCampaignId = campaign.id
+                                                searchQuery = campaign.name
+                                                dropdownExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    selectedCampaignId = null
+                                    searchQuery = "All Campaigns"
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Select All")
+                            }
+                        }
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier.padding(top = 8.dp)
                         ) {
                             Button(
                                 onClick = {
-                                    viewModel.exportCampaignData("csv")
+                                    val finalQuery = if (searchQuery == "All Campaigns") null else searchQuery
+                                    viewModel.exportCampaignData(
+                                        "csv",
+                                        selectedCampaignId,
+                                        finalQuery.takeIf { it?.isNotBlank() == true })
                                     showExportDialog = false
                                 },
                                 modifier = Modifier
                                     .focusRequester(exportButtonFocusRequester)
                                     .clickable {
-                                        viewModel.exportCampaignData("csv")
+                                        val finalQuery = if (searchQuery == "All Campaigns") null else searchQuery
+                                        viewModel.exportCampaignData(
+                                            "csv",
+                                            selectedCampaignId,
+                                            finalQuery.takeIf { it?.isNotBlank() == true })
                                         showExportDialog = false
                                     }
                             ) {
-                                Text("CSV")
+                                Text("Export CSV")
                             }
                             Button(
                                 onClick = {
-                                    viewModel.exportCampaignData("pdf")
+                                    val finalQuery = if (searchQuery == "All Campaigns") null else searchQuery
+                                    viewModel.exportCampaignData(
+                                        "pdf",
+                                        selectedCampaignId,
+                                        finalQuery.takeIf { it?.isNotBlank() == true })
                                     showExportDialog = false
                                 },
                                 modifier = Modifier.clickable {
-                                    viewModel.exportCampaignData("pdf")
+                                    val finalQuery = if (searchQuery == "All Campaigns") null else searchQuery
+                                    viewModel.exportCampaignData(
+                                        "pdf",
+                                        selectedCampaignId,
+                                        finalQuery.takeIf { it?.isNotBlank() == true })
                                     showExportDialog = false
                                 }
                             ) {
-                                Text("PDF")
+                                Text("Export PDF")
                             }
                             Button(
                                 onClick = { showExportDialog = false },
