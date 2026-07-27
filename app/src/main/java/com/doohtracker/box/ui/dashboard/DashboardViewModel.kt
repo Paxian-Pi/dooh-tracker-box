@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import androidx.work.WorkInfo
+import com.doohtracker.box.data.hardware.HdmiSignalMonitor
 import com.doohtracker.box.data.hardware.UsbConnectionMonitor
 import com.doohtracker.box.data.location.LocationMonitor
 import com.doohtracker.box.data.logic.VerificationGatekeeper
@@ -40,6 +41,7 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     @param:ApplicationContext private val context: Context,
     private val campaignRepository: CampaignRepository,
     private val usbConnectionMonitor: UsbConnectionMonitor,
+    val hdmiSignalMonitor: HdmiSignalMonitor,
     private val connectivityMonitor: ConnectivityMonitor,
     private val gatekeeper: VerificationGatekeeper,
     private val syncManager: SyncManager,
@@ -97,6 +99,22 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     val isHdmiActive: StateFlow<Boolean> = usbConnectionMonitor.isUsbDeviceConnected
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
+    private val _isHdmiStreamEnabled = MutableStateFlow(campaignRepository.isHdmiStreamEnabled())
+    val isHdmiStreamEnabled: StateFlow<Boolean> = _isHdmiStreamEnabled.asStateFlow()
+
+    val hdmiSignalStatus: StateFlow<String> = combine(
+        isHdmiActive,
+        hdmiSignalMonitor.isSourceActive,
+        _isHdmiStreamEnabled
+    ) { connected, active, toggleOn ->
+        when {
+            !connected -> "Inactive"
+            active -> "Active"
+            toggleOn -> "No Signal (Check Cable)"
+            else -> "Connected" 
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Inactive")
+
     val isConnected: StateFlow<Boolean> = connectivityMonitor.isConnected
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
@@ -141,15 +159,10 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     val allCampaignsList: StateFlow<List<com.doohtracker.box.data.local.CampaignEntity>> = campaignRepository.allCampaigns
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    private val _isHdmiStreamEnabled = MutableStateFlow(campaignRepository.isHdmiStreamEnabled())
-    val isHdmiStreamEnabled: StateFlow<Boolean> = _isHdmiStreamEnabled.asStateFlow()
-
     fun toggleHdmiStream(enabled: Boolean) {
         if (enabled && !isHdmiActive.value) {
             viewModelScope.launch {
-                _isHdmiStreamEnabled.value = true
                 Toast.makeText(context, "HDMI Signal is Inactive", android.widget.Toast.LENGTH_SHORT).show()
-                delay(1500.milliseconds)
                 _isHdmiStreamEnabled.value = false
                 campaignRepository.setHdmiStreamEnabled(false)
             }
@@ -334,7 +347,7 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
             
             val reportSuffix = when {
                 campaignId != null -> "_campaign_${campaignId}"
-                !searchQuery.isNullOrBlank() -> "_search_${searchQuery.replace(" ", "_")}"
+                !searchQuery.isNullOrBlank() -> "_search_${searchQuery?.replace(" ", "_")}"
                 else -> "_all"
             }
 

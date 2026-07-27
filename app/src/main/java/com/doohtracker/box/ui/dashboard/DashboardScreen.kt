@@ -81,6 +81,7 @@ import kotlin.time.Duration.Companion.milliseconds
 @Composable
 fun DashboardScreen(viewModel: DashboardViewModel) {
     val isHdmiActive by viewModel.isHdmiActive.collectAsState()
+    val hdmiSignalStatus by viewModel.hdmiSignalStatus.collectAsState()
     val isConnected by viewModel.isConnected.collectAsState()
     val currentCampaign by viewModel.currentCampaignName.collectAsState()
     val logs by viewModel.recentLogs.collectAsState()
@@ -141,11 +142,11 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             Text(
                                 text = "HDMI Preview",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = if (isHdmiStreamEnabled) MaterialTheme.colorScheme.primary else Color.Gray,
+                                color = if (isHdmiStreamEnabled && hdmiSignalStatus != "Inactive") MaterialTheme.colorScheme.primary else Color.Gray,
                                 modifier = Modifier.padding(end = 8.dp)
                             )
                             Switch(
-                                checked = isHdmiStreamEnabled,
+                                checked = isHdmiStreamEnabled && hdmiSignalStatus != "Inactive",
                                 onCheckedChange = { viewModel.toggleHdmiStream(it) },
                                 modifier = Modifier.scale(0.8f)
                             )
@@ -158,9 +159,14 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         StatusCard(
-                            title = "HDMI Signal",
-                            status = if (isHdmiActive) "Active" else "Inactive",
-                            color = if (isHdmiActive) StatusGreen else StatusRed,
+                            title = if(isHdmiStreamEnabled) "HDMI Signal" else "HDMI Connectivity",
+                            status = hdmiSignalStatus,
+                            color = when (hdmiSignalStatus) {
+                                "Active" -> StatusGreen
+                                "Connected" -> StatusCyan
+                                "No Signal (Check Cable)" -> StatusYellow
+                                else -> StatusRed
+                            },
                             modifier = Modifier.weight(1f)
                         )
 
@@ -332,7 +338,8 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                 HdmiPreview(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .background(Color.Black)
+                                        .background(Color.Black),
+                                    signalMonitor = viewModel.hdmiSignalMonitor
                                 )
                             }
 

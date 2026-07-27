@@ -44,19 +44,21 @@ class UsbConnectionMonitorImpl @Inject constructor(
     private var requestSuppressionEndTime = 0L
     
     private val appStartTime = System.currentTimeMillis()
-    private val checkMutex = Mutex()
-    private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    // Tracks if the current device in this session is considered "Authorized"
     private val _isSessionAuthorized = MutableStateFlow(false)
-
     private val _onNewPermissionGranted = MutableSharedFlow<Unit>()
     override val onNewPermissionGranted: Flow<Unit> = _onNewPermissionGranted.asSharedFlow()
 
-    private val checkTriggers = MutableSharedFlow<Unit>(replay = 1)
+    private val pollTrigger = MutableStateFlow(0L)
 
     init {
-        checkTriggers.tryEmit(Unit)
+        monitorScope.launch {
+            while (true) {
+                pollTrigger.value = System.currentTimeMillis()
+                delay(3000)
+            }
+        }
     }
 
     private val usbEvents = callbackFlow<Unit> {
@@ -74,60 +76,27 @@ class UsbConnectionMonitorImpl @Inject constructor(
 
                 when (action) {
                     UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
-                        device?.let { dev ->
-                            if (isVideoDevice(dev)) {
-                                val hardwareId = getHardwareId(dev)
-                                val lastAuthorized = prefs.getString(KEY_LAST_AUTHORIZED_VID_PID, "")
-                                val isBoot = (System.currentTimeMillis() - appStartTime) < 20000
-
-                                if (isBoot && hardwareId == lastAuthorized) {
-                                    Log.d("USB", "Boot: Recognized hardware found. Auto-authorizing session.")
-                                    _isSessionAuthorized.value = true
-                                } else if (!isBoot) {
-                                    Log.d("USB", "Manual Attachment: Requester permission for $hardwareId")
-                                    _isSessionAuthorized.value = false
-                                    requestUsbPermission(dev)
-                                }
-                            }
-                        }
+                        _isSessionAuthorized.value = false
                         trySend(Unit)
                     }
                     UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                        Log.d("USB", "Device Detached. Resetting session.")
                         _isSessionAuthorized.value = false
                         trySend(Unit)
                     }
                     ACTION_USB_PERMISSION -> {
                         val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
-                        Log.d("USB", "Permission Result: $granted")
-                        
-                        lastResultReceivedTime = System.currentTimeMillis()
-                        
-                        device?.let { dev ->
-                            val hardwareId = getHardwareId(dev)
-
-                            if (granted) {
-                                prefs.edit(commit = true) { putString(KEY_LAST_AUTHORIZED_VID_PID, hardwareId) }
-                                _isSessionAuthorized.value = true
-                                
-                                val isFirstSetupComplete = prefs.getBoolean(KEY_IS_FIRST_SETUP_COMPLETE, false)
-                                // Trigger Restart Dialog if not the boot phase
-                                if (isFirstSetupComplete && (System.currentTimeMillis() - appStartTime > 30000)) {
-                                    monitorScope.launch { _onNewPermissionGranted.emit(Unit) }
-                                } else if (!isFirstSetupComplete) {
-                                    prefs.edit(commit = true) { putBoolean(KEY_IS_FIRST_SETUP_COMPLETE, true) }
-                                }
-                            } else {
-                                _isSessionAuthorized.value = false
-                            }
+                        if (granted && device != null) {
+                            prefs.edit(commit = true) { putString(KEY_LAST_AUTHORIZED_VID_PID, getHardwareId(device)) }
+                            _isSessionAuthorized.value = true
                             
-                            monitorScope.launch {
-                                delay(5.seconds) 
-                                isDialogShowing = false
-                                pendingPermissionRequests.remove(hardwareId)
-                                trySend(Unit)
+                            if (prefs.getBoolean(KEY_IS_FIRST_SETUP_COMPLETE, false)) {
+                                monitorScope.launch { _onNewPermissionGranted.emit(Unit) }
+                            } else {
+                                prefs.edit(commit = true) { putBoolean(KEY_IS_FIRST_SETUP_COMPLETE, true) }
                             }
                         }
+                        isDialogShowing = false
+                        trySend(Unit)
                     }
                 }
             }
@@ -151,62 +120,39 @@ class UsbConnectionMonitorImpl @Inject constructor(
 
     override val isUsbDeviceConnected: Flow<Boolean> = combine(
         usbEvents.onStart { emit(Unit) },
-        checkTriggers,
-        _isSessionAuthorized,
-        flow { 
-            while (true) {
-                emit(Unit)
-                delay(5000.milliseconds) 
-            }
-        }
-    ) { _, _, sessionAuth, _ ->
-        checkAndSyncHardwareState(sessionAuth)
-    }
-    .distinctUntilChanged()
-    .shareIn(
-        scope = monitorScope,
-        started = SharingStarted.Eagerly,
-        replay = 1
-    )
-
-    override fun triggerCheck() {
-        checkTriggers.tryEmit(Unit)
-    }
-
-    override fun suppressAutomatedRequests(durationMillis: Long) {
-        requestSuppressionEndTime = System.currentTimeMillis() + durationMillis
-    }
-
-    private suspend fun checkAndSyncHardwareState(sessionAuth: Boolean): Boolean = checkMutex.withLock {
+        pollTrigger,
+        _isSessionAuthorized
+    ) { _, _, sessionAuth ->
         val deviceList = usbManager.deviceList
-        var foundActive = false
-        val currentTime = System.currentTimeMillis()
-        val isBootWindow = (currentTime - appStartTime) < 15000
+        var found = false
         val lastAuthorized = prefs.getString(KEY_LAST_AUTHORIZED_VID_PID, "")
+        val isBoot = (System.currentTimeMillis() - appStartTime) < 20000
 
         for (device in deviceList.values) {
             if (isVideoDevice(device)) {
-                val hasOsPermission = usbManager.hasPermission(device)
                 val hardwareId = getHardwareId(device)
-
-                // LOGIC:
-                // If it's the boot window and matches historical hardware -> Auto-Active
-                // If the user already clicked OK in this session -> Active
-                // If OS somehow remembers the permission -> Active
-                if (hasOsPermission || sessionAuth || (isBootWindow && hardwareId == lastAuthorized)) {
-                    if (isBootWindow && hardwareId == lastAuthorized && !sessionAuth) {
-                        Log.d("USB", "Boot Polling: Known hardware $hardwareId found. Restoring active state.")
+                val hasPermission = usbManager.hasPermission(device)
+                
+                if (hasPermission || sessionAuth || (isBoot && hardwareId == lastAuthorized)) {
+                    if (isBoot && hardwareId == lastAuthorized && !_isSessionAuthorized.value) {
                         _isSessionAuthorized.value = true
                     }
-                    foundActive = true
-                } else if (!isBootWindow) {
-                    // Not in boot window and not authorized -> Manual intervention required
-                    Log.d("USB", "Polling: Unauthorized device $hardwareId found. Requesting permission.")
+                    found = true
+                    break
+                } else if (!isBoot && !isDialogShowing && System.currentTimeMillis() > requestSuppressionEndTime) {
                     requestUsbPermission(device)
                 }
             }
         }
-        return foundActive
+        found
+    }.distinctUntilChanged().stateIn(monitorScope, SharingStarted.Eagerly, false)
+
+    override fun triggerCheck() {
+        pollTrigger.value = System.currentTimeMillis()
+    }
+
+    override fun suppressAutomatedRequests(durationMillis: Long) {
+        requestSuppressionEndTime = System.currentTimeMillis() + durationMillis
     }
 
     private fun isVideoDevice(device: UsbDevice): Boolean {
@@ -217,38 +163,23 @@ class UsbConnectionMonitorImpl @Inject constructor(
         return false
     }
 
-    private fun getHardwareId(device: UsbDevice): String {
-        return "${device.vendorId}:${device.productId}"
-    }
+    private fun getHardwareId(device: UsbDevice): String = "${device.vendorId}:${device.productId}"
 
     private fun requestUsbPermission(device: UsbDevice) {
-        val hardwareId = getHardwareId(device)
-        val currentTime = System.currentTimeMillis()
-        
-        if (isDialogShowing || pendingPermissionRequests.contains(hardwareId)) return
-        if (currentTime - lastResultReceivedTime < 10000) return
-        if (currentTime < requestSuppressionEndTime) return
-
+        if (isDialogShowing) return
         try {
-            Log.d("USB", "ACTION: requestPermission for $hardwareId")
             val intent = Intent(ACTION_USB_PERMISSION).apply {
                 setPackage(context.packageName)
                 putExtra(UsbManager.EXTRA_DEVICE, device)
             }
             val permissionIntent = PendingIntent.getBroadcast(
-                context,
-                0,
-                intent,
+                context, 0, intent,
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
             )
-            
-            pendingPermissionRequests.add(hardwareId)
             isDialogShowing = true
             usbManager.requestPermission(device, permissionIntent)
         } catch (e: Exception) {
-            Log.e("USB", "Error requesting USB permission", e)
             isDialogShowing = false
-            pendingPermissionRequests.remove(hardwareId)
         }
     }
 }

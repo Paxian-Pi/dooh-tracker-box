@@ -1,9 +1,9 @@
 <libraries>
   <library
       name=":@@:data::release"
-      jars="/Users/pax/.gradle/caches/9.4.1/transforms/a883a2935daac5fc6025f938a2a1f295/transformed/out/jars/classes.jar:/Users/pax/.gradle/caches/9.4.1/transforms/a883a2935daac5fc6025f938a2a1f295/transformed/out/jars/libs/R.jar"
+      jars="/Users/pax/.gradle/caches/9.4.1/transforms/8f15f864f82bd7cdf68dd0f2fac72661/transformed/out/jars/classes.jar:/Users/pax/.gradle/caches/9.4.1/transforms/8f15f864f82bd7cdf68dd0f2fac72661/transformed/out/jars/libs/R.jar"
       resolved="Dooh Tracker Box:data:unspecified"
-      folder="/Users/pax/.gradle/caches/9.4.1/transforms/a883a2935daac5fc6025f938a2a1f295/transformed/out"
+      folder="/Users/pax/.gradle/caches/9.4.1/transforms/8f15f864f82bd7cdf68dd0f2fac72661/transformed/out"
       manifest="AndroidManifest.xml"
       resFolder="res"
       assetsFolder="assets"

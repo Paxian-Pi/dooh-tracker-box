@@ -26,20 +26,26 @@ import javax.inject.Provider;
 public final class HdmiSignalMonitorImpl_Factory implements Factory<HdmiSignalMonitorImpl> {
   private final Provider<Context> contextProvider;
 
-  public HdmiSignalMonitorImpl_Factory(Provider<Context> contextProvider) {
+  private final Provider<UsbConnectionMonitor> usbConnectionMonitorProvider;
+
+  public HdmiSignalMonitorImpl_Factory(Provider<Context> contextProvider,
+      Provider<UsbConnectionMonitor> usbConnectionMonitorProvider) {
     this.contextProvider = contextProvider;
+    this.usbConnectionMonitorProvider = usbConnectionMonitorProvider;
   }
 
   @Override
   public HdmiSignalMonitorImpl get() {
-    return newInstance(contextProvider.get());
+    return newInstance(contextProvider.get(), usbConnectionMonitorProvider.get());
   }
 
-  public static HdmiSignalMonitorImpl_Factory create(Provider<Context> contextProvider) {
-    return new HdmiSignalMonitorImpl_Factory(contextProvider);
+  public static HdmiSignalMonitorImpl_Factory create(Provider<Context> contextProvider,
+      Provider<UsbConnectionMonitor> usbConnectionMonitorProvider) {
+    return new HdmiSignalMonitorImpl_Factory(contextProvider, usbConnectionMonitorProvider);
   }
 
-  public static HdmiSignalMonitorImpl newInstance(Context context) {
-    return new HdmiSignalMonitorImpl(context);
+  public static HdmiSignalMonitorImpl newInstance(Context context,
+      UsbConnectionMonitor usbConnectionMonitor) {
+    return new HdmiSignalMonitorImpl(context, usbConnectionMonitor);
   }
 }
