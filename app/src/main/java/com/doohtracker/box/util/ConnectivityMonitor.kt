@@ -10,6 +10,8 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,6 +23,7 @@ class ConnectivityMonitor @Inject constructor(
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
     val isConnected: Flow<Boolean> = callbackFlow {
+        // ... (existing code)
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 trySend(true)
@@ -45,4 +48,26 @@ class ConnectivityMonitor @Inject constructor(
             connectivityManager.unregisterNetworkCallback(callback)
         }
     }.distinctUntilChanged()
+
+    fun getLocalIpAddress(): String {
+        return try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            var ip = "Unknown"
+            while (interfaces.hasMoreElements()) {
+                val networkInterface = interfaces.nextElement()
+                val addresses = networkInterface.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val address = addresses.nextElement()
+                    if (!address.isLoopbackAddress && address is Inet4Address) {
+                        ip = address.hostAddress ?: "Unknown"
+                        // Prioritize non-virtual interfaces if possible, but for simplicity:
+                        if (!networkInterface.name.contains("dummy")) return ip
+                    }
+                }
+            }
+            ip
+        } catch (e: Exception) {
+            "Error"
+        }
+    }
 }

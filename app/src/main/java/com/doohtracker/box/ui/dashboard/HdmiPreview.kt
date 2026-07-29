@@ -3,7 +3,6 @@ package com.doohtracker.box.ui.dashboard
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
 import android.os.Handler
@@ -22,7 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.tv.material3.Text
-import com.doohtracker.box.data.hardware.HdmiSignalMonitor
+import com.doohtracker.box.data.hardware.SignalMonitor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlin.time.Duration.Companion.milliseconds
@@ -32,7 +31,7 @@ import androidx.core.graphics.get
 @Composable
 fun HdmiPreview(
     modifier: Modifier = Modifier,
-    signalMonitor: HdmiSignalMonitor? = null
+    signalMonitor: SignalMonitor? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val cameraManager = remember { context.getSystemService(Context.CAMERA_SERVICE) as CameraManager }

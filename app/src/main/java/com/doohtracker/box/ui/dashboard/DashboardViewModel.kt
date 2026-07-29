@@ -7,7 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import androidx.work.WorkInfo
-import com.doohtracker.box.data.hardware.HdmiSignalMonitor
+import com.doohtracker.box.data.hardware.SignalMonitor
 import com.doohtracker.box.data.hardware.UsbConnectionMonitor
 import com.doohtracker.box.data.location.LocationMonitor
 import com.doohtracker.box.data.logic.VerificationGatekeeper
@@ -41,7 +41,7 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     @param:ApplicationContext private val context: Context,
     private val campaignRepository: CampaignRepository,
     private val usbConnectionMonitor: UsbConnectionMonitor,
-    val hdmiSignalMonitor: HdmiSignalMonitor,
+    val signalMonitor: SignalMonitor,
     private val connectivityMonitor: ConnectivityMonitor,
     private val gatekeeper: VerificationGatekeeper,
     private val syncManager: SyncManager,
@@ -58,6 +58,44 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
 
     private val _onLogoutSuccess = MutableSharedFlow<Unit>()
     val onLogoutSuccess = _onLogoutSuccess.asSharedFlow()
+
+    private val timeTicker = flow {
+        while (true) {
+            emit(timeProvider.getCurrentTimeMillis())
+            delay(10000.milliseconds)
+        }
+    }
+
+    val anyCampaignActive: StateFlow<Boolean> = combine(
+        campaignRepository.allCampaigns,
+        timeTicker
+    ) { all, now ->
+        all.any { it.startTime <= now && it.endTime >= now }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val isSourceLinked: StateFlow<Boolean> = signalMonitor.isSourceActive
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val sourceMonitorStatus: StateFlow<String> = combine(
+        isSourceLinked,
+        anyCampaignActive,
+        campaignRepository.allCampaigns,
+        signalMonitor.sourceMetadata
+    ) { linked, anyActive, all, metadata ->
+        when {
+            linked && anyActive -> {
+                val hasExternalOutput = metadata?.activePorts != null && metadata.activePorts != "Internal/None"
+                val isTransmitting = metadata?.isTransmitting == true
+                if (hasExternalOutput && isTransmitting) "Active" else "No Media Detected"
+            }
+            linked && !anyActive -> "Window Closed"
+            !linked && all.isNotEmpty() -> "Ready"
+            else -> "Inactive"
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Inactive")
+
+    private val _isHdmiStreamEnabled = MutableStateFlow(campaignRepository.isHdmiStreamEnabled())
+    val isHdmiStreamEnabled: StateFlow<Boolean> = _isHdmiStreamEnabled.asStateFlow()
 
     init {
         usbConnectionMonitor.onNewPermissionGranted
@@ -96,27 +134,15 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
         }
     }
 
-    val isHdmiActive: StateFlow<Boolean> = usbConnectionMonitor.isUsbDeviceConnected
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-
-    private val _isHdmiStreamEnabled = MutableStateFlow(campaignRepository.isHdmiStreamEnabled())
-    val isHdmiStreamEnabled: StateFlow<Boolean> = _isHdmiStreamEnabled.asStateFlow()
-
-    val hdmiSignalStatus: StateFlow<String> = combine(
-        isHdmiActive,
-        hdmiSignalMonitor.isSourceActive,
-        _isHdmiStreamEnabled
-    ) { connected, active, toggleOn ->
-        when {
-            !connected -> "Inactive"
-            active -> "Active"
-            toggleOn -> "No Signal (Check Cable)"
-            else -> "Connected" 
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Inactive")
-
     val isConnected: StateFlow<Boolean> = connectivityMonitor.isConnected
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val localIpAddress: StateFlow<String> = flow {
+        while (true) {
+            emit(connectivityMonitor.getLocalIpAddress())
+            delay(30000.milliseconds) // Refresh every 30 seconds
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Detecting...")
 
     val activationCode: StateFlow<String> = campaignRepository.allCampaigns
         .map { campaignRepository.getActivationCode() }
@@ -135,20 +161,6 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Never")
 
-    private val timeTicker = flow {
-        while (true) {
-            emit(timeProvider.getCurrentTimeMillis())
-            delay(10000.milliseconds)
-        }
-    }
-
-    val anyCampaignActive: StateFlow<Boolean> = combine(
-        campaignRepository.allCampaigns,
-        timeTicker
-    ) { all, now ->
-        all.any { it.startTime <= now && it.endTime >= now }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-
     val totalCampaignsCount: StateFlow<Int> = combine(
         campaignRepository.allCampaigns,
         timeTicker
@@ -160,9 +172,9 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun toggleHdmiStream(enabled: Boolean) {
-        if (enabled && !isHdmiActive.value) {
+        if (enabled && !isSourceLinked.value) {
             viewModelScope.launch {
-                Toast.makeText(context, "HDMI Signal is Inactive", android.widget.Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Source Monitor is not Linked", android.widget.Toast.LENGTH_SHORT).show()
                 _isHdmiStreamEnabled.value = false
                 campaignRepository.setHdmiStreamEnabled(false)
             }
@@ -187,7 +199,7 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
                 "No Scheduled Campaigns Now"
             }
         } else {
-            "Waiting for HDMI Stream"
+            "Waiting for scheduled campaign(s)"
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Initializing...")
 

@@ -12,6 +12,7 @@ import com.doohtracker.box.data.remote.CampaignApi
 import com.doohtracker.box.data.remote.MediaDownloader
 import com.doohtracker.box.data.time.TimeProvider
 import com.doohtracker.box.data.util.baseUrl
+import com.doohtracker.box.data.hardware.SignalMonitor
 import com.doohtracker.box.data.hardware.UsbConnectionMonitor
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
@@ -29,7 +30,7 @@ class CampaignRepository @Inject constructor(
     private val campaignDao: CampaignDao,
     private val trackingLogDao: TrackingLogDao,
     private val deviceManager: DeviceManager,
-    private val usbMonitor: UsbConnectionMonitor,
+    private val signalMonitor: SignalMonitor,
     private val mediaDownloader: MediaDownloader,
     private val timeProvider: TimeProvider
 ) {
@@ -152,12 +153,25 @@ class CampaignRepository @Inject constructor(
 
     suspend fun trackCurrentCampaigns(currentTime: Long, locationString: String) {
         val activeCampaigns = campaignDao.getActiveCampaigns(currentTime).first()
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        activeCampaigns.forEach { campaign ->
+            // Trigger both PoP and Hourly tracking at the same time
+            sendTrackingPulse(campaign, currentTime, locationString, 60)
+        }
+    }
+
+    private suspend fun sendTrackingPulse(
+        campaign: CampaignEntity,
+        currentTime: Long,
+        locationString: String,
+        durationSeconds: Long
+    ) {
         val now = Date(currentTime)
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+        val dayFormat = SimpleDateFormat("EEEE", Locale.getDefault())
         val hourFormat = SimpleDateFormat("HH", Locale.getDefault())
         val calendar = Calendar.getInstance().apply { time = now }
-        val currentHourStr = hourFormat.format(now)
-
+        
         val weekDayNum = when (calendar.get(Calendar.DAY_OF_WEEK)) {
             Calendar.MONDAY -> "1"
             Calendar.TUESDAY -> "2"
@@ -169,83 +183,69 @@ class CampaignRepository @Inject constructor(
             else -> "1"
         }
 
-        activeCampaigns.forEach { campaign ->
-            val lastTrackedHour = if (campaign.lastHourlyTrackedAt > 0) {
-                hourFormat.format(Date(campaign.lastHourlyTrackedAt))
-            } else ""
+        val location = locationString.ifBlank { deviceManager.getInstallationNotes() }
 
-            if (currentHourStr != lastTrackedHour) {
-                val hourlyRequest = TrackHourlyRequest(
-                    user = campaign.user,
-                    campaign = campaign.campaign,
-                    campaignTag = campaign.campaignTag,
-                    hours = currentHourStr,
-                    date = dateFormat.format(now),
-                    count = campaign.syncedCount, 
-                    weekDay = weekDayNum,
-                    location = locationString.ifBlank { deviceManager.getInstallationNotes() },
-                    uniqueID = campaign.id
-                )
-
-                try {
-                    val response = api.trackHourly(hourlyRequest)
-                    if (response.isSuccessful) {
-                        campaignDao.updateLastHourlyTrackedAt(campaign.id, currentTime)
-                    }
-                } catch (_: Exception) {
-                    Log.e("Tracking", "Hourly track failed for ${campaign.id}")
-                }
-            }
-        }
-    }
-
-    suspend fun trackPlayback(campaignId: String, durationSeconds: Long) {
-        // Gate check without circular dependency on VerificationGatekeeper
-        val isHardwareActive = usbMonitor.isUsbDeviceConnected.first()
-        if (!isHardwareActive) {
-            Log.d("Tracking", "Suppressed PoP: HDMI Hardware Inactive")
-            return
-        }
-
-        val campaigns = campaignDao.getAllCampaigns().first()
-        val campaign = campaigns.find { it.id == campaignId } ?: return
-        
-        val currentTime = timeProvider.getCurrentTimeMillis()
-        val now = Date(currentTime)
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-        val dayFormat = SimpleDateFormat("EEEE", Locale.getDefault())
-        
-        val locationString = deviceManager.getInstallationNotes() 
-
-        val request = SendProofOfPlayRequest(
+        // 1. Send Proof of Play (The "Spot")
+        val popRequest = SendProofOfPlayRequest(
             user = campaign.user,
             campaign = campaign.campaign,
             campaignTag = campaign.campaignTag,
             time = timeFormat.format(now),
             date = dateFormat.format(now),
             day = dayFormat.format(now),
-            comment = "Playback-based tracking",
-            location = locationString,
+            comment = "Automatic tracking",
+            location = location,
             uniqueID = campaign.id,
             durationCount = durationSeconds,
             confidence = 1.0f
         )
 
-        Log.d("Tracking", "Sending Proof of Play: $request")
-
-        val log = TrackingLogEntity(campaignId = campaign.id, timestamp = currentTime)
         try {
-            val response = api.sendProofOfPlay(request)
-            if (response.isSuccessful) {
-                trackingLogDao.insertLog(log.copy(isSynced = true))
+            val popResponse = api.sendProofOfPlay(popRequest)
+            if (popResponse.isSuccessful) {
+                trackingLogDao.insertLog(TrackingLogEntity(campaignId = campaign.id, timestamp = currentTime, isSynced = true))
                 campaignDao.incrementSyncedCount(campaign.id)
+                
+                // Fetch updated campaign to get new count for hourly sync
+                val updatedCampaign = campaignDao.getAllCampaigns().first().find { it.id == campaign.id } ?: campaign
+                
+                // 2. Send Hourly Track at the same time (syncs cumulative count)
+                val hourlyRequest = TrackHourlyRequest(
+                    user = updatedCampaign.user,
+                    campaign = updatedCampaign.campaign,
+                    campaignTag = updatedCampaign.campaignTag,
+                    hours = hourFormat.format(now),
+                    date = dateFormat.format(now),
+                    count = updatedCampaign.syncedCount,
+                    weekDay = weekDayNum,
+                    location = location,
+                    uniqueID = updatedCampaign.id
+                )
+                
+                api.trackHourly(hourlyRequest)
+                campaignDao.updateLastHourlyTrackedAt(updatedCampaign.id, currentTime)
             } else {
-                trackingLogDao.insertLog(log.copy(isSynced = false))
+                trackingLogDao.insertLog(TrackingLogEntity(campaignId = campaign.id, timestamp = currentTime, isSynced = false))
             }
-        } catch (_: Exception) {
-            trackingLogDao.insertLog(log.copy(isSynced = false))
+        } catch (e: Exception) {
+            Log.e("Tracking", "Tracking pulse failed for ${campaign.id}", e)
+            trackingLogDao.insertLog(TrackingLogEntity(campaignId = campaign.id, timestamp = currentTime, isSynced = false))
         }
+    }
+
+    suspend fun trackPlayback(campaignId: String, durationSeconds: Long) {
+        val isSignalActive = signalMonitor.isSourceActive.first()
+        if (!isSignalActive) return
+
+        val campaigns = campaignDao.getAllCampaigns().first()
+        val campaign = campaigns.find { it.id == campaignId } ?: return
+        
+        sendTrackingPulse(
+            campaign = campaign,
+            currentTime = timeProvider.getCurrentTimeMillis(),
+            locationString = deviceManager.getInstallationNotes(),
+            durationSeconds = durationSeconds
+        )
     }
 
     suspend fun syncPendingLogs() {

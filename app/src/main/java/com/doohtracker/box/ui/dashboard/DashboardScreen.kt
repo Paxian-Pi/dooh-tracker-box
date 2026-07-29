@@ -80,8 +80,8 @@ import kotlin.time.Duration.Companion.milliseconds
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun DashboardScreen(viewModel: DashboardViewModel) {
-    val isHdmiActive by viewModel.isHdmiActive.collectAsState()
-    val hdmiSignalStatus by viewModel.hdmiSignalStatus.collectAsState()
+    val isSourceLinked by viewModel.isSourceLinked.collectAsState()
+    val sourceMonitorStatus by viewModel.sourceMonitorStatus.collectAsState()
     val isConnected by viewModel.isConnected.collectAsState()
     val currentCampaign by viewModel.currentCampaignName.collectAsState()
     val logs by viewModel.recentLogs.collectAsState()
@@ -90,6 +90,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
     val syncStatus by viewModel.syncStatus.collectAsState()
     val location by viewModel.currentLocation.collectAsState()
     val lastSyncTime by viewModel.lastSyncTime.collectAsState()
+    val localIp by viewModel.localIpAddress.collectAsState()
     val anyCampaignActive by viewModel.anyCampaignActive.collectAsState()
     val systemHealth by viewModel.systemHealth.collectAsState()
     val currentMediaCampaign by viewModel.playbackManager.currentCampaign.collectAsState()
@@ -140,31 +141,40 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "HDMI Preview",
+                                text = "Source Preview",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = if (isHdmiStreamEnabled && hdmiSignalStatus != "Inactive") MaterialTheme.colorScheme.primary else Color.Gray,
+                                color = if (isHdmiStreamEnabled && sourceMonitorStatus != "Inactive") MaterialTheme.colorScheme.primary else Color.Gray,
                                 modifier = Modifier.padding(end = 8.dp)
                             )
                             Switch(
-                                checked = isHdmiStreamEnabled && hdmiSignalStatus != "Inactive",
+                                checked = isHdmiStreamEnabled && sourceMonitorStatus != "Inactive",
                                 onCheckedChange = { viewModel.toggleHdmiStream(it) },
                                 modifier = Modifier.scale(0.8f)
                             )
                         }
                     }
 
-                    // Row 1: Core Connectivity
+                    // Row 1: IP Address
+                    Text(
+                        text = "IP Address: $localIp",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 2.dp)
+                    )
+
+                    // Row 2: Core Connectivity
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         StatusCard(
-                            title = if(isHdmiStreamEnabled) "HDMI Signal" else "HDMI Connectivity",
-                            status = hdmiSignalStatus,
-                            color = when (hdmiSignalStatus) {
+                            title = if (isSourceLinked) "Source Monitor" else "Tracker Status",
+                            status = sourceMonitorStatus,
+                            color = when (sourceMonitorStatus) {
                                 "Active" -> StatusGreen
-                                "Connected" -> StatusCyan
-                                "No Signal (Check Cable)" -> StatusYellow
+                                "Ready" -> StatusCyan
+                                "Window Closed" -> StatusYellow
+                                "No Media Detected" -> Color(0xFF87CEEB) // Light Blue (Sky Blue)
                                 else -> StatusRed
                             },
                             modifier = Modifier.weight(1f)
@@ -179,13 +189,14 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
 
                         StatusCard(
                             title = "Site ID",
+//                            info = "IP: $localIp",
                             status = siteId,
                             color = Color.White,
                             modifier = Modifier.weight(1f)
                         )
                     }
 
-                    // Row 2: Campaign Status
+                    // Row 3: Campaign Status
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -227,7 +238,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         }
                     }
 
-                    // Row 3: Location and Sync/Spots
+                    // Row 4: Location and Sync/Spots
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -251,7 +262,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         }
                     }
 
-                    // Row 4: System Health
+                    // Row 5: System Health
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -278,7 +289,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         )
                     }
 
-                    if(!anyCampaignActive) {
+                    if (!anyCampaignActive) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth(),
@@ -322,7 +333,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         val campaign = currentMediaCampaign
 
                         val mediaType = when {
-                            isHdmiActive && isHdmiStreamEnabled -> "hdmi"
+                            isSourceLinked && isHdmiStreamEnabled -> "hdmi"
                             campaign == null -> "none"
                             campaign.mediaType?.lowercase() == "image" ||
                                     campaign.mediaUrl?.lowercase()?.let {
@@ -335,11 +346,11 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
 
                         when (mediaType) {
                             "hdmi" -> {
-                                HdmiPreview(
+                                SourceMonitorPreview(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .background(Color.Black),
-                                    signalMonitor = viewModel.hdmiSignalMonitor
+                                        .background(Color(0xFF1E2136)),
+                                    signalMonitor = viewModel.signalMonitor
                                 )
                             }
 

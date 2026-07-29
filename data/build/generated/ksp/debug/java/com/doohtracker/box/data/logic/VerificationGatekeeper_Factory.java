@@ -1,6 +1,6 @@
 package com.doohtracker.box.data.logic;
 
-import com.doohtracker.box.data.hardware.UsbConnectionMonitor;
+import com.doohtracker.box.data.hardware.SignalMonitor;
 import com.doohtracker.box.data.repository.CampaignRepository;
 import com.doohtracker.box.data.time.TimeProvider;
 import dagger.internal.DaggerGenerated;
@@ -28,32 +28,30 @@ import javax.inject.Provider;
 public final class VerificationGatekeeper_Factory implements Factory<VerificationGatekeeper> {
   private final Provider<CampaignRepository> campaignRepositoryProvider;
 
-  private final Provider<UsbConnectionMonitor> usbConnectionMonitorProvider;
+  private final Provider<SignalMonitor> signalMonitorProvider;
 
   private final Provider<TimeProvider> timeProvider;
 
   public VerificationGatekeeper_Factory(Provider<CampaignRepository> campaignRepositoryProvider,
-      Provider<UsbConnectionMonitor> usbConnectionMonitorProvider,
-      Provider<TimeProvider> timeProvider) {
+      Provider<SignalMonitor> signalMonitorProvider, Provider<TimeProvider> timeProvider) {
     this.campaignRepositoryProvider = campaignRepositoryProvider;
-    this.usbConnectionMonitorProvider = usbConnectionMonitorProvider;
+    this.signalMonitorProvider = signalMonitorProvider;
     this.timeProvider = timeProvider;
   }
 
   @Override
   public VerificationGatekeeper get() {
-    return newInstance(campaignRepositoryProvider.get(), usbConnectionMonitorProvider.get(), timeProvider.get());
+    return newInstance(campaignRepositoryProvider.get(), signalMonitorProvider.get(), timeProvider.get());
   }
 
   public static VerificationGatekeeper_Factory create(
       Provider<CampaignRepository> campaignRepositoryProvider,
-      Provider<UsbConnectionMonitor> usbConnectionMonitorProvider,
-      Provider<TimeProvider> timeProvider) {
-    return new VerificationGatekeeper_Factory(campaignRepositoryProvider, usbConnectionMonitorProvider, timeProvider);
+      Provider<SignalMonitor> signalMonitorProvider, Provider<TimeProvider> timeProvider) {
+    return new VerificationGatekeeper_Factory(campaignRepositoryProvider, signalMonitorProvider, timeProvider);
   }
 
   public static VerificationGatekeeper newInstance(CampaignRepository campaignRepository,
-      UsbConnectionMonitor usbConnectionMonitor, TimeProvider timeProvider) {
-    return new VerificationGatekeeper(campaignRepository, usbConnectionMonitor, timeProvider);
+      SignalMonitor signalMonitor, TimeProvider timeProvider) {
+    return new VerificationGatekeeper(campaignRepository, signalMonitor, timeProvider);
   }
 }

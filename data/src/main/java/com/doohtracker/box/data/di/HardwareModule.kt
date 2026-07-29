@@ -1,7 +1,7 @@
 package com.doohtracker.box.data.di
 
-import com.doohtracker.box.data.hardware.HdmiSignalMonitor
-import com.doohtracker.box.data.hardware.HdmiSignalMonitorImpl
+import com.doohtracker.box.data.hardware.SignalMonitor
+import com.doohtracker.box.data.hardware.SignalMonitorImpl
 import com.doohtracker.box.data.hardware.UsbConnectionMonitor
 import com.doohtracker.box.data.hardware.UsbConnectionMonitorImpl
 import com.doohtracker.box.data.system.SystemHealthMonitor
@@ -19,8 +19,8 @@ abstract class HardwareModule {
     @Binds
     @Singleton
     abstract fun bindHdmiSignalMonitor(
-        impl: HdmiSignalMonitorImpl
-    ): HdmiSignalMonitor
+        impl: SignalMonitorImpl
+    ): SignalMonitor
 
     @Binds
     @Singleton
