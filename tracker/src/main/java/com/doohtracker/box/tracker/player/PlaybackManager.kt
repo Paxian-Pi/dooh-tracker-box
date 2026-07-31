@@ -150,16 +150,20 @@ class PlaybackManager @Inject constructor(
     private fun handleItemFinished() {
         val finishedCampaign = _currentCampaign.value ?: return
         
-        // Use 5s for images, actual for videos
-        val durationSeconds = if (finishedCampaign.mediaType?.lowercase() == "image") {
-            5L
-        } else {
-            val duration = _player?.duration ?: 0L
-            if (duration > 0) (duration / 1000.0).roundToLong() else 0L
-        }
-
         playerScope.launch(Dispatchers.IO) {
-            campaignRepository.trackPlayback(finishedCampaign.id, durationSeconds)
+            val isAllowed = gatekeeper.isTrackingAllowed.first()
+            if (isAllowed) {
+                // Use 5s for images, actual for videos
+                val durationSeconds = if (finishedCampaign.mediaType?.lowercase() == "image") {
+                    5L
+                } else {
+                    val duration = _player?.duration ?: 0L
+                    if (duration > 0) (duration / 1000.0).roundToLong() else 0L
+                }
+                campaignRepository.trackPlayback(finishedCampaign.id, durationSeconds)
+            } else {
+                Log.d("Playback", "Tracking skipped for ${finishedCampaign.name} (Source Monitor not Active)")
+            }
         }
 
         // Cycle next

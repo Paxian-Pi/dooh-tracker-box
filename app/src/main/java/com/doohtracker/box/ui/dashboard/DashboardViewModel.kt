@@ -48,6 +48,7 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     private val systemActions: SystemActions,
     private val locationMonitor: LocationMonitor,
     private val systemHealthMonitor: SystemHealthMonitor,
+    private val deviceManager: com.doohtracker.box.data.manager.DeviceManager,
     private val timeProvider: TimeProvider,
     val playbackManager: PlaybackManager
 ) : ViewModel() {
@@ -58,6 +59,15 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
 
     private val _onLogoutSuccess = MutableSharedFlow<Unit>()
     val onLogoutSuccess = _onLogoutSuccess.asSharedFlow()
+
+    private val _showPortSelectionDialog = MutableStateFlow(false)
+    val showPortSelectionDialog: StateFlow<Boolean> = _showPortSelectionDialog.asStateFlow()
+
+    private val _detectedPorts = MutableStateFlow<List<String>>(emptyList())
+    val detectedPorts: StateFlow<List<String>> = _detectedPorts.asStateFlow()
+
+    private val _authorizedPort = MutableStateFlow(deviceManager.getAuthorizedPort())
+    val authorizedPort: StateFlow<String?> = _authorizedPort.asStateFlow()
 
     private val timeTicker = flow {
         while (true) {
@@ -83,13 +93,24 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
         signalMonitor.sourceMetadata
     ) { linked, anyActive, all, metadata ->
         when {
-            linked && anyActive -> {
-                val hasExternalOutput = metadata?.activePorts != null && metadata.activePorts != "Internal/None"
-                val isTransmitting = metadata?.isTransmitting == true
-                if (hasExternalOutput && isTransmitting) "Active" else "No Media Detected"
+            linked -> {
+                if (anyActive) {
+                    val authorizedPort = deviceManager.getAuthorizedPort()
+                    val activePorts = metadata?.activePorts?.split(",")?.map { it.trim() } ?: emptyList()
+                    
+                    val hasAuthorizedPort = authorizedPort != null && activePorts.contains(authorizedPort)
+                    val isTransmitting = metadata?.isTransmitting == true
+                    
+                    if (hasAuthorizedPort && isTransmitting) {
+                        "Active"
+                    } else {
+                        "No Media Detected"
+                    }
+                } else {
+                    "Window Closed"
+                }
             }
-            linked && !anyActive -> "Window Closed"
-            !linked && all.isNotEmpty() -> "Ready"
+            all.isNotEmpty() -> "Ready"
             else -> "Inactive"
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Inactive")
@@ -98,6 +119,24 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     val isHdmiStreamEnabled: StateFlow<Boolean> = _isHdmiStreamEnabled.asStateFlow()
 
     init {
+        // Automatically show dialog if a new output is detected and no port is authorized yet
+        signalMonitor.sourceMetadata
+            .onEach { metadata ->
+                val authorized = deviceManager.getAuthorizedPort()
+                if (metadata != null && metadata.activePorts != "Internal/None" && authorized == null) {
+                    val ports = metadata.activePorts.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                    
+                    if (ports.size == 1) {
+                        // Auto-select if only one port is available
+                        authorizePort(ports[0])
+                    } else if (ports.size > 1) {
+                        _detectedPorts.value = ports
+                        _showPortSelectionDialog.value = true
+                    }
+                }
+            }
+            .launchIn(viewModelScope)
+
         usbConnectionMonitor.onNewPermissionGranted
             .onEach {
                 val currentTime = timeProvider.getCurrentTimeMillis()
@@ -117,6 +156,33 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
 
     fun dismissRestartDialog() {
         _showRestartDialog.value = false
+    }
+
+    fun authorizePort(port: String) {
+        deviceManager.setAuthorizedPort(port)
+        _authorizedPort.value = port
+        _showPortSelectionDialog.value = false
+    }
+
+    fun triggerPortSelection() {
+        viewModelScope.launch {
+            val metadata = signalMonitor.sourceMetadata.first()
+            if (metadata != null && metadata.activePorts != "Internal/None") {
+                val ports = metadata.activePorts.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                
+                if (ports.size == 1) {
+                    authorizePort(ports[0])
+                    Toast.makeText(context, "Port ${ports[0]} automatically selected", Toast.LENGTH_SHORT).show()
+                } else if (ports.size > 1) {
+                    _detectedPorts.value = ports
+                    _showPortSelectionDialog.value = true
+                } else {
+                    Toast.makeText(context, "No Active Ports found", Toast.LENGTH_LONG).show()
+                }
+            } else {
+                Toast.makeText(context, "No Active Ports to select from", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     fun openLocationSettings() {

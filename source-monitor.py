@@ -51,13 +51,12 @@ class SourceMonitorApp:
         self.is_running = False
         self.tracker_ip = None
         self.search_start_time = 0
-        self.is_hibernating = False # New state for auto-reconnect
+        self.is_hibernating = False 
 
         if self.is_gui:
             self.root.title("DOOH Source Monitor")
             self.root.geometry("540x500")
 
-            # Variables
             if USE_CUSTOM_TK:
                 self.target_id_var = ctk.StringVar()
                 self.status_msg_var = ctk.StringVar(value="Status: Stopped")
@@ -65,7 +64,6 @@ class SourceMonitorApp:
                 self.target_id_var = tk.StringVar()
                 self.status_msg_var = tk.StringVar(value="Status: Stopped")
 
-            # OS-specific window fixes
             try:
                 self.root.lift()
                 self.root.focus_force()
@@ -82,9 +80,14 @@ class SourceMonitorApp:
 
         self.log("App initialized. Source platform: " + ("macOS" if platform.system() == "Darwin" else platform.system()))
 
-        if initial_id:
-            self.log(f"Auto-starting with ID: {initial_id}")
-            self.root.after(500, self.toggle_monitoring)
+        # Auto-resume: Start monitoring if an ID is present
+        active_id = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
+        if active_id:
+            self.log(f"Auto-starting with ID: {active_id}")
+            if self.is_gui:
+                self.root.after(500, self.toggle_monitoring)
+            else:
+                self.toggle_monitoring()
 
     def create_widgets(self):
         if USE_CUSTOM_TK:
@@ -98,12 +101,11 @@ class SourceMonitorApp:
                 textvariable=self.target_id_var,
                 height=45,
                 placeholder_text="Enter Site ID...",
-                corner_radius=22.5, # Highly rounded edges (height / 2)
+                corner_radius=22.5,
                 justify='center',
                 border_width=1,
                 font=("Courier", 12.5)
             )
-            self.entry_id.pack(pady=10)
             self.entry_id.pack(pady=10, padx=30, fill="x")
 
             ctk.CTkLabel(self.main_frame, text="(Required to link a specific tracker)", text_color="gray", font=("Helvetica", 12)).pack()
@@ -119,10 +121,9 @@ class SourceMonitorApp:
                 height=50,
                 corner_radius=25,
                 font=("Helvetica", 14, "bold"),
-                fg_color="#297339",
-                hover_color="#2A6337"
+                fg_color="#218838",
+                hover_color="#297339"
             )
-            self.btn_toggle.pack(pady=20)
             self.btn_toggle.pack(pady=10, padx=30)
 
             ctk.CTkLabel(self.main_frame, text="Activity Log", font=("Helvetica", 12, "bold")).pack(anchor="w", padx=35, pady=(15, 0))
@@ -130,35 +131,22 @@ class SourceMonitorApp:
             self.log_area.pack(pady=10, padx=30, fill="x")
             self.log_area.configure(state="disabled")
         else:
-            # Target ID Input
             tk.Label(self.root, text="Target Tracker ID (Site ID):", font=('Helvetica', 10, 'bold')).pack(pady=(20, 5))
-            self.entry_id = tk.Entry(self.root, textvariable=self.target_id_var, width=30, justify='center', font=('Helvetica', 12))
+            self.entry_id = tk.Entry(self.root, textvariable=self.target_id_var, width=30, justify='center')
             self.entry_id.pack(pady=5)
-            tk.Label(self.root, text="(Required to link a specific tracker)", fg="gray").pack()
-
-            # Status Display
-            tk.Label(self.root, textvariable=self.status_msg_var, font=('Helvetica', 10)).pack(pady=10)
-
-            # Control Buttons
-            self.btn_toggle = tk.Button(self.root, text="Start Monitoring", command=self.toggle_monitoring,
-                                        bg="#4CAF50", fg="black", height=2, width=20)
+            tk.Label(self.root, textvariable=self.status_msg_var).pack(pady=10)
+            self.btn_toggle = tk.Button(self.root, text="Start Monitoring", command=self.toggle_monitoring)
             self.btn_toggle.pack(pady=10)
-
-            # Log Area
-            tk.Label(self.root, text="Activity Log:").pack(anchor="w", padx=20)
-            self.log_area = scrolledtext.ScrolledText(self.root, height=10, width=55, state='disabled', font=('Courier', 9))
+            self.log_area = scrolledtext.ScrolledText(self.root, height=10, width=55, state='disabled')
             self.log_area.pack(pady=5, padx=10)
 
     def log(self, message):
         timestamp = time.strftime("%H:%M:%S")
         full_msg = f"[{timestamp}] {message}"
-
         if self.is_gui:
             self.root.after(0, self._safe_log_update, full_msg)
         else:
             print(full_msg)
-
-        # Write to file
         try:
             with open(LOG_FILE, "a") as f:
                 f.write(full_msg + "\n")
@@ -167,12 +155,8 @@ class SourceMonitorApp:
 
     def _safe_log_update(self, msg):
         self.log_area.configure(state='normal')
-        if USE_CUSTOM_TK:
-            self.log_area.insert("end", msg + "\n")
-            self.log_area.see("end")
-        else:
-            self.log_area.insert("end", msg + "\n")
-            self.log_area.see("end")
+        self.log_area.insert("end", msg + "\n")
+        self.log_area.see("end")
         self.log_area.configure(state='disabled')
 
     def update_status(self, msg):
@@ -186,8 +170,7 @@ class SourceMonitorApp:
                     data = json.load(f)
                     val = data.get("target_id", "")
                     self.target_id_var.set(val)
-            except:
-                pass
+            except: pass
 
     def save_config(self):
         current_id = self.target_id_var.get() if self.is_gui else self.target_id_raw
@@ -196,47 +179,40 @@ class SourceMonitorApp:
 
     def toggle_monitoring(self):
         if not self.is_running:
-            # Validation: Ensure Site ID is not empty
             active_id = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
             if not active_id:
                 if self.is_gui:
                     messagebox.showerror("Error", "Target Tracker ID is required.")
                     self.entry_id.focus_set()
-                else:
-                    self.log("[!] Error: Target Tracker ID is required.")
                 return
 
-            if self.is_gui:
-                self.target_id_var.set(active_id) # Update UI with stripped ID
-
             self.save_config()
-            self.tracker_ip = None # Reset IP to force a fresh discovery and ID validation
+            self.tracker_ip = None
             self.search_start_time = time.time()
             self.is_running = True
-            self.is_hibernating = False # Stop any background watchdog
+            self.is_hibernating = False
             if self.is_gui:
                 if USE_CUSTOM_TK:
                     self.btn_toggle.configure(text="Searching (30s)", fg_color="#FFBF00", hover_color="#E5AB00", text_color="black")
                     self.entry_id.configure(state='disabled')
                 else:
-                    self.btn_toggle.config(text="Searching (30s)", bg="#FFBF00", fg="black")
+                    self.btn_toggle.config(text="Searching (30s)", bg="#FFBF00")
                     self.entry_id.config(state='disabled')
                 self.update_status("Status: Searching for Tracker...")
                 self.root.after(100, self._update_smooth_timer)
 
             self.monitor_thread = threading.Thread(target=self.monitoring_loop, daemon=True)
             self.monitor_thread.start()
-
-            self.log("Monitoring started for ID: " + active_id + " ✔")
+            self.log(f"Monitoring started for ID: {active_id}")
         else:
             self.is_running = False
-            self.is_hibernating = False # Manual stop clears auto-reconnect
+            self.is_hibernating = False
             if self.is_gui:
                 if USE_CUSTOM_TK:
-                    self.btn_toggle.configure(text="Start Monitoring", fg_color="#28a745", hover_color="#218838")
+                    self.btn_toggle.configure(text="Start Monitoring", fg_color="#218838", hover_color="#297339", text_color="white")
                     self.entry_id.configure(state='normal')
                 else:
-                    self.btn_toggle.config(text="Start Monitoring", bg="#4CAF50")
+                    self.btn_toggle.config(text="Start Monitoring", bg="green")
                     self.entry_id.config(state='normal')
                 self.update_status("Status: Stopped")
             self.log("Monitoring stopped.")
@@ -244,73 +220,72 @@ class SourceMonitorApp:
     def _update_smooth_timer(self):
         if not self.is_running or self.tracker_ip:
             return
-
         elapsed = time.time() - self.search_start_time
         remaining = int(max(0, 30 - elapsed))
-
         status = self.status_msg_var.get()
-        if "Searching for Tracker" in status:
-            text = f"Resetting in ({remaining}s)"
+        if "Searching" in status:
+            text = f"Searching ({remaining}s)"
+            color = "#FFBF00"
             if USE_CUSTOM_TK:
-                self.btn_toggle.configure(text=text, fg_color="#FFBF00", hover_color="#E5AB00", text_color="black")
+                self.btn_toggle.configure(text=text, fg_color=color, text_color="black")
             else:
-                self.btn_toggle.config(text=text, bg="#FFBF00", fg="black")
-        else:
-            # If not explicitly searching (e.g., Connection Lost), keep the "Stop Monitoring" appearance
-            if USE_CUSTOM_TK:
-                self.btn_toggle.configure(text="Stop Monitoring", fg_color="#dc3545", hover_color="#c82333", text_color="white")
-            else:
-                self.btn_toggle.config(text="Stop Monitoring", bg="#f44336", fg="white")
-
+                self.btn_toggle.config(text=text, bg=color)
         if remaining > 0:
             self.root.after(100, self._update_smooth_timer)
 
     def is_media_playing(self):
         system = platform.system()
+        cflags = 0x08000000 if system == "Windows" else 0
         if system == "Windows":
-            players = ["vlc", "mpc-hc", "chrome", "wmplayer", "powershell"]
-            cmd = 'tasklist'
+            cmd = 'tasklist /FI "STATUS eq RUNNING"'
+            players = ["vlc", "mpc-hc", "chrome", "wmplayer"]
         elif system == "Darwin":
-            players = ["vlc", "quicktime player", "iina", "chrome", "safari", "plex"]
             cmd = 'ps -e'
+            players = ["vlc", "quicktime player", "iina", "chrome"]
         else:
-            players = ["vlc", "mpv", "chrome", "firefox"]
             cmd = 'ps -e'
-
+            players = ["vlc", "mpv", "chrome"]
         try:
-            output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode().lower()
+            output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, creationflags=cflags, timeout=2).decode().lower()
             return any(player in output for player in players)
-        except:
-            return True
+        except: return True
 
     def get_active_ports(self):
         """Detects physical display output ports currently active."""
         system = platform.system()
+        cflags = 0x08000000 if system == "Windows" else 0
         ports = []
         try:
             if system == "Darwin":
                 # 1. Fast check via ioreg (Hardware Registry)
-                ioreg_out = subprocess.check_output(["ioreg", "-n", "AppleDisplay", "-r"]).decode().upper()
-                # 2. Detailed check via system_profiler (Connection Types)
-                sp_out = subprocess.check_output(["system_profiler", "SPDisplaysDataType"]).decode()
+                ioreg_out = ""
+                try: ioreg_out = subprocess.check_output(["ioreg", "-n", "AppleDisplay", "-r"], timeout=2).decode().upper()
+                except: pass
+
+                # 2. Detailed check via system_profiler
+                sp_out = ""
+                try: sp_out = subprocess.check_output(["system_profiler", "SPDisplaysDataType"], timeout=3).decode().upper()
+                except: pass
                 
-                # Check for active external connection markers
-                if "HDMI" in ioreg_out or "HDMI" in sp_out.upper(): ports.append("HDMI")
-                if "DISPLAYPORT" in ioreg_out or "DISPLAYPORT" in sp_out.upper(): ports.append("DP/USB-C")
-                if "DVI" in ioreg_out or "DVI" in sp_out.upper(): ports.append("DVI")
-                if "VGA" in ioreg_out or "VGA" in sp_out.upper(): ports.append("VGA")
+                # Look for specific connection signatures
+                if "HDMI" in ioreg_out or "HDMI" in sp_out: ports.append("HDMI")
+                if "DISPLAYPORT" in ioreg_out or "DISPLAYPORT" in sp_out: ports.append("DP/USB-C")
+                if "DVI" in ioreg_out or "DVI" in sp_out: ports.append("DVI")
+                if "VGA" in ioreg_out or "VGA" in sp_out: ports.append("VGA")
                 
-                # If we see "Online: Yes" for a non-internal display but can't identify type
-                if not ports and sp_out.count("Online: Yes") > 1:
+                # Fallback: Check if multiple displays are "Online" but type is generic
+                if not ports and sp_out.count("ONLINE: YES") > 1:
                     ports.append("External Monitor")
 
             elif system == "Windows":
-                # Check for monitors with "Availability = 3" (Running/Full Power)
-                cmd = "powershell \"Get-CimInstance Win32_DesktopMonitor | Where-Object {$_.Availability -eq 3} | Select-Object -ExpandProperty Caption\""
-                output = subprocess.check_output(cmd, shell=True).decode().strip()
+                # Use a faster, lighter query for Windows
+                cmd = "powershell -Command \"Get-WmiObject Win32_PnPEntity | Where-Object { $_.Service -eq 'monitor' } | Select-Object -ExpandProperty Name\""
+                output = subprocess.check_output(cmd, shell=True, creationflags=cflags, timeout=3).decode().strip()
                 if output:
-                    ports.append(output.split('\n')[0][:15]) # Get first monitor name
-                else:
+                    for line in output.split('\n'):
+                        if "Generic" not in line or "PnP" in line:
+                            ports.append(line[:15].strip())
+                if not ports:
                     ports.append("Display Active")
             else:
                 # Linux (X11)
@@ -326,25 +301,19 @@ class SourceMonitorApp:
     def check_transmission(self):
         """Checks if the system is actively transmitting video/audio signals."""
         system = platform.system()
+        cflags = 0x08000000 if system == "Windows" else 0
         try:
             if system == "Darwin":
                 # Precise check of macOS Power Assertions
-                output = subprocess.check_output(["pmset", "-g", "assertions"]).decode()
-                is_video = False
-                is_audio = False
-                for line in output.splitlines():
-                    # Only return YES if the specific media assertions are set to 1
-                    if "PreventUserIdleDisplaySleep" in line and " 1" in line:
-                        is_video = True
-                    if "PreventUserIdleSystemSleep" in line and " 1" in line:
-                        is_audio = True
+                output = subprocess.check_output(["pmset", "-g", "assertions"], timeout=2).decode()
+                is_video = any("PreventUserIdleDisplaySleep" in l and " 1" in l for l in output.splitlines())
+                is_audio = any("PreventUserIdleSystemSleep" in l and " 1" in l for l in output.splitlines())
                 return "YES" if (is_video or is_audio) else "NO"
             elif system == "Windows":
-                output = subprocess.check_output("powercfg /requests", shell=True).decode()
-                # Windows lists active drivers/processes under [VIDEO] or [AUDIO]
-                # If these sections are not "None", transmission is happening
-                is_video = "DISPLAY:" in output and "None" not in output.split("DISPLAY:")[1].splitlines()[0]
-                is_audio = "AUDIO:" in output and "None" not in output.split("AUDIO:")[1].splitlines()[0]
+                output = subprocess.check_output("powercfg /requests", shell=True, creationflags=cflags, timeout=2).decode().upper()
+                # Safer check: ensure "NONE" isn't the only thing in the relevant lines
+                is_video = "DISPLAY:" in output and "NONE" not in output.split("DISPLAY:")[1].split("\n")[1]
+                is_audio = "AUDIO:" in output and "NONE" not in output.split("AUDIO:")[1].split("\n")[1]
                 return "YES" if (is_video or is_audio) else "NO"
         except:
             pass
@@ -353,167 +322,102 @@ class SourceMonitorApp:
     def monitoring_loop(self):
         while self.is_running:
             try:
+                found_ip = self.find_tracker_ip()
+                site_id = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
+                if found_ip:
+                    if self.tracker_ip != found_ip:
+                        self.log(f"🔄 Tracker IP for {site_id} changed or rediscovered: {found_ip}")
+                        self.tracker_ip = found_ip
+                    self.search_start_time = time.time()
+                
+                elapsed = time.time() - self.search_start_time
+                if elapsed > 30:
+                    self.log(f"⚠️ Tracker not found for {site_id}. Resetting...")
+                    self.tracker_ip = None
+                    if self.is_gui: self.root.after(0, self._start_hibernation)
+                    else: self.is_running = False
+                    return
+
                 if not self.tracker_ip:
-                    elapsed = time.time() - self.search_start_time
-                    remaining = int(max(0, 30 - elapsed))
-
-                    # Reset after 30 seconds of searching without a match
-                    if elapsed > 30:
-                        self.log(f"⚠️ Tracker not found for {self.target_id_var.get() if self.is_gui else self.target_id_raw}. Resetting...")
-                        if self.is_gui:
-                            self.root.after(0, self._start_hibernation)
-                        else:
-                            self.is_running = False
-                            print("[*] Monitoring stopped due to search timeout.")
-                        return
-
                     self.update_status("Status: Searching for Tracker...")
+                    time.sleep(1)
+                    continue
 
-                    # Non-blocking search (short timeout)
-                    self.tracker_ip = self.find_tracker_ip()
-                    if not self.tracker_ip:
-                        time.sleep(0.1) # Brief pause to prevent CPU pegging
-                        continue
-
-                    self.log(f"Connected to tracker at {self.tracker_ip}")
-
-                # Check health and send heartbeat
                 status = "HEALTHY" if self.is_media_playing() else "NO_MEDIA"
                 active_ports = self.get_active_ports()
                 transmitting = self.check_transmission()
+                if active_ports == "Internal/None": transmitting = "NO"
                 
-                # Logic: Even if media is playing, if no external ports are active, 
-                # we are not "transmitting" to a target screen.
-                if active_ports == "Internal/None":
-                    transmitting = "NO"
-
-                source_time = int(time.time() * 1000) # Current system time in ms
-                
-                # Format: PULSE:{status}:{hostname}:{ports}:{timestamp}:{transmitting}
+                source_time = int(time.time() * 1000)
                 message = f"PULSE:{status}:{platform.node()}:{active_ports}:{source_time}:{transmitting}"
 
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                     s.settimeout(2.0)
                     s.sendto(message.encode(), (self.tracker_ip, HEARTBEAT_PORT))
                     self.update_status(f"Status: Connected to {self.tracker_ip}")
-                    # Ensure button is Red/Stop when connected
                     if self.is_gui:
-                        self.root.after(0, lambda: self.btn_toggle.configure(text="Stop Monitoring", fg_color="#dc3545", hover_color="#c82333", text_color="white") if USE_CUSTOM_TK else self.btn_toggle.config(text="Stop Monitoring", bg="#f44336", fg="white"))
-                    # Reset timeout once connection is established/maintained
+                        self.root.after(0, lambda: self.btn_toggle.configure(text="Stop Monitoring", fg_color="#dc3545", hover_color="#c82333", text_color="white") if USE_CUSTOM_TK else self.btn_toggle.config(text="Stop Monitoring", bg="red"))
                     self.search_start_time = time.time()
+
             except Exception as e:
-                self.log(f"Connection lost: {e}")
+                self.log(f"Connection error: {e}")
                 self.tracker_ip = None
                 self.update_status("Status: Connection Lost. Retrying...")
-                # Start 30s countdown upon connection loss
-                self.search_start_time = time.time()
-                if self.is_gui:
-                    self.root.after(0, self._update_smooth_timer)
-
+                if self.is_gui: self.root.after(0, self._update_smooth_timer)
             time.sleep(BEAT_INTERVAL)
 
     def find_tracker_ip(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.bind(('', BROADCAST_PORT))
-            s.settimeout(0.5) # Short timeout for smooth UI countdown
+            s.settimeout(0.5)
             try:
                 data, addr = s.recvfrom(1024)
                 parts = data.decode().split(":")
-                # Expected format from Android: DOOH_TRACKER_ADVERT:PORT:SITE_ID
                 if parts[0] == "DOOH_TRACKER_ADVERT":
                     found_id = parts[2] if len(parts) > 2 else "UNKNOWN"
+                    current_owner = parts[3] if len(parts) > 3 else "NONE"
                     target = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
-
                     if target.lower() == found_id.lower():
-                        self.log(f"✅ Site ID Match: {found_id} ({addr[0]})")
+                        my_name = platform.node()
+                        if current_owner != "NONE" and current_owner != my_name:
+                            self.update_status(f"Status: Site ID in use by {current_owner}")
+                            return None
                         return addr[0]
-                    else:
-                        # Only log mismatch once every 5 seconds to avoid flooding
-                        if not hasattr(self, '_last_mismatch_log') or time.time() - self._last_mismatch_log > 5:
-                            if not self.is_hibernating: # Don't log mismatches during quiet hibernation
-                                self.log(f"ℹ️ Found different tracker: {found_id} (Skipping)")
-                            self._last_mismatch_log = time.time()
-            except socket.timeout:
-                pass
-            except Exception as e:
-                if not self.is_hibernating:
-                    self.log(f"Discovery error: {e}")
+            except: pass
             return None
 
     def _start_hibernation(self):
-        """Called on timeout. Resets UI but starts passive background discovery."""
-        if self.is_running:
-            self.toggle_monitoring() # UI stop
-        
+        if self.is_running: self.toggle_monitoring()
         self.is_hibernating = True
         self.update_status("Status: Offline (Auto-resume active)")
         self.log("Waiting for network/tracker recovery... 💤")
         threading.Thread(target=self._hibernation_watchdog, daemon=True).start()
 
     def _hibernation_watchdog(self):
-        """Passive background loop that waits for the tracker to reappear."""
         while self.is_hibernating and not self.is_running:
             ip = self.find_tracker_ip()
             if ip:
-                self.log("✨ Network/Tracker recovered! Resuming monitoring...")
+                self.log("✨ Network recovered! Resuming...")
                 self.is_hibernating = False
-                if self.is_gui:
-                    self.root.after(0, self.toggle_monitoring)
+                if self.is_gui: self.root.after(0, self.toggle_monitoring)
                 return
-            time.sleep(5) # Quiet check every 5 seconds
+            time.sleep(5)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="DOOH Source Monitor")
     parser.add_argument("--id", help="Target Tracker Site ID")
-    parser.add_argument("--cli", action="store_true", help="Run in CLI mode (no GUI)")
+    parser.add_argument("--cli", action="store_true", help="Run in CLI mode")
     args = parser.parse_args()
-
-    # Determine if we should attempt GUI
-    use_gui = not args.cli
-
-    if use_gui:
+    if not args.cli:
         try:
-            if USE_CUSTOM_TK:
-                root = ctk.CTk()
-            else:
-                root = tk.Tk()
-
-            # macOS-specific activation
+            root = ctk.CTk() if USE_CUSTOM_TK else tk.Tk()
             if platform.system() == "Darwin":
-                try:
-                    # Try to bring the window to the very front using AppleScript
-                    curr_pid = os.getpid()
-                    script = f'tell application "System Events" to set frontmost of the first process whose unix id is {curr_pid} to true'
-                    subprocess.Popen(['osascript', '-e', script])
-                except:
-                    # Fallback for older macOS
-                    os.system('''/usr/bin/osascript -e 'tell app "Finder" to set frontmost of process "python" to true' ''')
-
+                subprocess.Popen(['osascript', '-e', f'tell application "System Events" to set frontmost of the first process whose unix id is {os.getpid()} to true'])
             app = SourceMonitorApp(root, initial_id=args.id)
-
-            # Final attempts to force visibility
-            root.update_idletasks()
-            root.lift()
-            if not USE_CUSTOM_TK:
-                root.attributes('-topmost', True)
-                root.after(500, lambda: root.attributes('-topmost', False))
-            root.focus_force()
-
             root.mainloop()
-        except Exception as e:
-            print(f"[*] GUI could not be initialized: {e}")
-            print("[*] Falling back to CLI mode...")
-            use_gui = False
-
-    if not use_gui:
-        # CLI Mode Execution
+        except: args.cli = True
+    if args.cli:
         app = SourceMonitorApp(None, initial_id=args.id)
-        print(f"[*] CLI Monitor active for ID: {args.id or 'ANY'}")
-        print("[*] Press Ctrl+C to stop.")
         try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            app.is_running = False
-            print("\n[!] Exiting...")
-            sys.exit(0)
+            while True: time.sleep(1)
+        except KeyboardInterrupt: sys.exit(0)

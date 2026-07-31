@@ -1,6 +1,7 @@
 package com.doohtracker.box.data.logic
 
 import com.doohtracker.box.data.hardware.SignalMonitor
+import com.doohtracker.box.data.manager.DeviceManager
 import com.doohtracker.box.data.repository.CampaignRepository
 import com.doohtracker.box.data.time.TimeProvider
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -14,6 +15,7 @@ import kotlin.time.Duration.Companion.milliseconds
 class VerificationGatekeeper @Inject constructor(
     private val campaignRepository: CampaignRepository,
     private val signalMonitor: SignalMonitor,
+    private val deviceManager: DeviceManager,
     private val timeProvider: TimeProvider
 ) {
     /**
@@ -33,17 +35,24 @@ class VerificationGatekeeper @Inject constructor(
             signalMonitor.isSourceActive,
             signalMonitor.sourceMetadata
         ) { activeCampaigns, isSourceActive, metadata ->
+            // Authorized Port Check
+            val authorizedPort = deviceManager.getAuthorizedPort()
+            val hasCorrectOutput = if (authorizedPort != null && metadata != null) {
+                metadata.activePorts.split(",").map { it.trim() }.contains(authorizedPort)
+            } else {
+                metadata?.activePorts != null && metadata.activePorts != "Internal/None"
+            }
+
             // Refined Active Rules:
             // 1. Must have scheduled campaigns
             val hasCampaigns = activeCampaigns.isNotEmpty()
             // 2. Source Monitor must be linked
             val isLinked = isSourceActive
-            // 3. Must have external output (HDMI, etc)
-            val hasExternalOutput = metadata?.activePorts != null && metadata.activePorts != "Internal/None"
+            // 3. Must have the correct external output
             // 4. Must be actively transmitting media
             val isTransmitting = metadata?.isTransmitting == true
 
-            hasCampaigns && isLinked && hasExternalOutput && isTransmitting
+            hasCampaigns && isLinked && hasCorrectOutput && isTransmitting
         }
     }.distinctUntilChanged()
 }

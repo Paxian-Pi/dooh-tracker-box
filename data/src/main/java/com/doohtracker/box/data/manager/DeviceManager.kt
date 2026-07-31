@@ -19,8 +19,15 @@ class DeviceManager @Inject constructor(
     private val KEY_ACTIVATION_CODE = "activation_code"
     private val KEY_LAST_SYNC_TIME = "last_sync_time"
     private val KEY_HDMI_STREAM_ENABLED = "hdmi_stream_enabled"
+    private val KEY_AUTHORIZED_PORT = "authorized_monitoring_port"
 
     fun isActivated(): Boolean = prefs.getBoolean(KEY_IS_ACTIVATED, false)
+    
+    fun getAuthorizedPort(): String? = prefs.getString(KEY_AUTHORIZED_PORT, null)
+
+    fun setAuthorizedPort(port: String?) {
+        prefs.edit { putString(KEY_AUTHORIZED_PORT, port) }
+    }
     
     fun isHdmiStreamEnabled(): Boolean = prefs.getBoolean(KEY_HDMI_STREAM_ENABLED, false)
 

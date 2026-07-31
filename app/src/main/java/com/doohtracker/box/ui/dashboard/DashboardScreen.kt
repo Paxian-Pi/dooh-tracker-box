@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -96,6 +97,9 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
     val currentMediaCampaign by viewModel.playbackManager.currentCampaign.collectAsState()
     val isHdmiStreamEnabled by viewModel.isHdmiStreamEnabled.collectAsState()
     val siteId by viewModel.activationCode.collectAsState()
+    val showPortDialog by viewModel.showPortSelectionDialog.collectAsState()
+    val detectedPorts by viewModel.detectedPorts.collectAsState()
+    val authorizedPort by viewModel.authorizedPort.collectAsState()
 
     var showExportDialog by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
@@ -350,7 +354,8 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .background(Color(0xFF1E2136)),
-                                    signalMonitor = viewModel.signalMonitor
+                                    signalMonitor = viewModel.signalMonitor,
+                                    authorizedPort = authorizedPort
                                 )
                             }
 
@@ -563,6 +568,76 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                 modifier = Modifier.clickable { viewModel.dismissRestartDialog() }
                             ) {
                                 Text("Cancel")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Port Selection Dialog Overlay
+        if (showPortDialog) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.85f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier
+                        .wrapContentSize()
+                        .padding(24.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text(
+                            text = "Select Monitoring Port",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Multiple outputs detected. Select the port that will transmit media to the screen.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier
+                                .widthIn(min = 250.dp, max = 400.dp)
+                                .heightIn(max = 300.dp)
+                                .verticalScroll(rememberScrollState())
+                                .padding(vertical = 8.dp)
+                        ) {
+                            detectedPorts.forEach { port ->
+                                Button(
+                                    onClick = { viewModel.authorizePort(port) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { viewModel.authorizePort(port) },
+                                    colors = ButtonDefaults.colors(
+                                        containerColor = if (authorizedPort == port)
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                                            else Color(0xFF1E2136),
+                                        contentColor = Color.White
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Text(
+                                            text = port,
+                                            fontWeight = if (authorizedPort == port) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

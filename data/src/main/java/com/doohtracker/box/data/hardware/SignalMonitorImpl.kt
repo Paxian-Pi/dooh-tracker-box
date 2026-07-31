@@ -4,11 +4,13 @@ import android.content.Context
 import android.hardware.camera2.CameraManager
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.time.Duration.Companion.milliseconds
 
 @Singleton
 class SignalMonitorImpl @Inject constructor(
@@ -29,7 +31,21 @@ class SignalMonitorImpl @Inject constructor(
     private var lastHeartbeatTime = 0L
 
     override fun reportHeartbeat(metadata: SourceMetadata?) {
-        lastHeartbeatTime = System.currentTimeMillis()
+        val now = System.currentTimeMillis()
+        
+        // Ownership Lock: If we have an active source, only allow heartbeats from the SAME hostname
+        val currentMetadata = _sourceMetadata.value
+        val isCurrentlyActive = (now - lastHeartbeatTime) < 5000
+        
+        if (isCurrentlyActive && currentMetadata != null && metadata != null) {
+            if (currentMetadata.hostname != metadata.hostname) {
+                // Ignore heartbeats from other machines while the current one is active
+                Log.w("SignalMonitor", "Rejected heartbeat from ${metadata.hostname}. ${currentMetadata.hostname} is currently active.")
+                return
+            }
+        }
+
+        lastHeartbeatTime = now
         if (metadata != null) {
             _sourceMetadata.value = metadata
         }
@@ -60,7 +76,7 @@ class SignalMonitorImpl @Inject constructor(
                         _isSourceActive.value = false
                     }
                 }
-                delay(1000)
+                delay(1000.milliseconds)
             }
         }
     }

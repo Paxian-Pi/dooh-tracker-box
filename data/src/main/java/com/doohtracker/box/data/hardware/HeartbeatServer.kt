@@ -4,6 +4,7 @@ import com.doohtracker.box.data.hardware.SignalMonitor
 import com.doohtracker.box.data.repository.CampaignRepository
 import android.util.Log
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -106,14 +107,18 @@ class HeartbeatServer @Inject constructor(
             while (isActive) {
                 try {
                     val siteId = campaignRepository.getActivationCode().ifBlank { "UNACTIVATED" }
-                    val discoveryMsg = "DOOH_TRACKER_ADVERT:${port}:${siteId}".toByteArray()
+                    val currentOwner = if (signalMonitor.isSourceActive.first()) {
+                        signalMonitor.sourceMetadata.first()?.hostname ?: "NONE"
+                    } else "NONE"
+                    
+                    val discoveryMsg = "DOOH_TRACKER_ADVERT:${port}:${siteId}:${currentOwner}".toByteArray()
                     val broadcastAddr = InetAddress.getByName("255.255.255.255")
                     val discoveryPacket = DatagramPacket(discoveryMsg, discoveryMsg.size, broadcastAddr, 50006)
                     socket?.send(discoveryPacket)
                 } catch (e: Exception) {
                     // Ignore broadcast errors
                 }
-                delay(5000.milliseconds) // Broadcast every 5 seconds
+                delay(2000.milliseconds) // Broadcast every 2 seconds (Increased frequency for stability)
             }
         }
     }
