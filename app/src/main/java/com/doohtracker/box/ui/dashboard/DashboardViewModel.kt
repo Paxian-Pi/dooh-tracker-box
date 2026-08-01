@@ -90,21 +90,21 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
         isSourceLinked,
         anyCampaignActive,
         campaignRepository.allCampaigns,
-        signalMonitor.sourceMetadata
-    ) { linked, anyActive, all, metadata ->
+        signalMonitor.sourceMetadata,
+        authorizedPort
+    ) { linked, anyActive, all, metadata, authorized ->
         when {
             linked -> {
                 if (anyActive) {
-                    val authorizedPort = deviceManager.getAuthorizedPort()
-                    val activePorts = metadata?.activePorts?.split(",")?.map { it.trim() } ?: emptyList()
-                    
-                    val hasAuthorizedPort = authorizedPort != null && activePorts.contains(authorizedPort)
+                    val activePorts = metadata?.activePorts?.split(",")?.map { it.trim().uppercase() } ?: emptyList()
                     val isTransmitting = metadata?.isTransmitting == true
                     
-                    if (hasAuthorizedPort && isTransmitting) {
-                        "Active"
-                    } else {
-                        "No Media Detected"
+                    val hasAuthorizedPort = authorized != null && activePorts.contains(authorized.uppercase())
+                    
+                    when {
+                        hasAuthorizedPort && isTransmitting -> "Active"
+                        hasAuthorizedPort && !isTransmitting -> "No Media Detected"
+                        else -> "No Media Detected"
                     }
                 } else {
                     "Window Closed"
@@ -161,6 +161,10 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     fun authorizePort(port: String) {
         deviceManager.setAuthorizedPort(port)
         _authorizedPort.value = port
+        _showPortSelectionDialog.value = false
+    }
+
+    fun dismissPortDialog() {
         _showPortSelectionDialog.value = false
     }
 

@@ -85,25 +85,49 @@ class PlaybackManager @Inject constructor(
 
     private fun startPlaylistMonitor() {
         playerScope.launch {
-            while (isActive) {
-                val now = timeProvider.getCurrentTimeMillis()
-                val active = campaignRepository.allCampaigns.first().filter { 
-                    it.startTime <= now && it.endTime >= now && 
-                    !it.mediaUrl.isNullOrBlank() && !it.localPath.isNullOrBlank()
+            // Observe tracking allowed state
+            gatekeeper.isTrackingAllowed.collectLatest { isAllowed ->
+                if (!isAllowed) {
+                    Log.d("Playback", "Tracking not allowed. Stopping player.")
+                    stopPlayback()
+                    return@collectLatest
                 }
-                
-                if (active.map { it.id } != fullPlaylist.map { it.id }) {
-                    Log.d("Playback", "Playlist Updated. Syncing ${active.size} campaigns.")
-                    fullPlaylist.clear()
-                    fullPlaylist.addAll(active)
+
+                // If allowed, run the playlist maintenance loop
+                while (isActive) {
+                    val now = timeProvider.getCurrentTimeMillis()
+                    val active = campaignRepository.allCampaigns.first().filter { 
+                        it.startTime <= now && it.endTime >= now && 
+                        !it.mediaUrl.isNullOrBlank() && !it.localPath.isNullOrBlank()
+                    }
+                    
+                    if (active.map { it.id } != fullPlaylist.map { it.id }) {
+                        Log.d("Playback", "Playlist Updated. Syncing ${active.size} campaigns.")
+                        fullPlaylist.clear()
+                        fullPlaylist.addAll(active)
+                        if (!isPlaying && fullPlaylist.isNotEmpty()) {
+                            currentIndex = 0
+                            startCurrentItem()
+                        }
+                    }
+                    
                     if (!isPlaying && fullPlaylist.isNotEmpty()) {
-                        currentIndex = 0
                         startCurrentItem()
                     }
+                    
+                    delay(15.seconds)
                 }
-                delay(15.seconds)
             }
         }
+    }
+
+    private fun stopPlayback() {
+        imageTimerJob?.cancel()
+        _player?.stop()
+        _player?.clearMediaItems()
+        _currentCampaign.value = null
+        isPlaying = false
+        fullPlaylist.clear()
     }
 
     private fun startCurrentItem() {
@@ -148,18 +172,21 @@ class PlaybackManager @Inject constructor(
     }
 
     private fun handleItemFinished() {
+        if (!isPlaying) return // Ignore if we've been stopped manually or via gatekeeper
+
         val finishedCampaign = _currentCampaign.value ?: return
         
+        // Capture duration on Main thread before switching to IO
+        val durationMs = if (finishedCampaign.mediaType?.lowercase() == "image") {
+            5000L
+        } else {
+            _player?.duration ?: 0L
+        }
+
         playerScope.launch(Dispatchers.IO) {
             val isAllowed = gatekeeper.isTrackingAllowed.first()
             if (isAllowed) {
-                // Use 5s for images, actual for videos
-                val durationSeconds = if (finishedCampaign.mediaType?.lowercase() == "image") {
-                    5L
-                } else {
-                    val duration = _player?.duration ?: 0L
-                    if (duration > 0) (duration / 1000.0).roundToLong() else 0L
-                }
+                val durationSeconds = (durationMs / 1000.0).roundToLong()
                 campaignRepository.trackPlayback(finishedCampaign.id, durationSeconds)
             } else {
                 Log.d("Playback", "Tracking skipped for ${finishedCampaign.name} (Source Monitor not Active)")

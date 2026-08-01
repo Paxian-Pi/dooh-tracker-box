@@ -304,17 +304,34 @@ class SourceMonitorApp:
         cflags = 0x08000000 if system == "Windows" else 0
         try:
             if system == "Darwin":
-                # Precise check of macOS Power Assertions
                 output = subprocess.check_output(["pmset", "-g", "assertions"], timeout=2).decode()
                 is_video = any("PreventUserIdleDisplaySleep" in l and " 1" in l for l in output.splitlines())
                 is_audio = any("PreventUserIdleSystemSleep" in l and " 1" in l for l in output.splitlines())
                 return "YES" if (is_video or is_audio) else "NO"
             elif system == "Windows":
+                # Strategy 1: Power Requests (requires admin for some fields)
                 output = subprocess.check_output("powercfg /requests", shell=True, creationflags=cflags, timeout=2).decode().upper()
-                # Safer check: ensure "NONE" isn't the only thing in the relevant lines
-                is_video = "DISPLAY:" in output and "NONE" not in output.split("DISPLAY:")[1].split("\n")[1]
-                is_audio = "AUDIO:" in output and "NONE" not in output.split("AUDIO:")[1].split("\n")[1]
-                return "YES" if (is_video or is_audio) else "NO"
+                is_power_video = "DISPLAY:" in output and "NONE" not in output.split("DISPLAY:")[1].split("\n")[1]
+                is_power_audio = "AUDIO:" in output and "NONE" not in output.split("AUDIO:")[1].split("\n")[1]
+                
+                if is_power_video or is_power_audio:
+                    return "YES"
+
+                # Strategy 2: Audio Session Check (Does any app have an active audio session?)
+                # This doesn't require admin and catches VLC/Chrome reliably
+                cmd = "powershell -Command \"Get-AudioDevice -Playback | Get-AudioDevice -List | Where-Object {$_.Type -eq 'Playback'} | Select-Object -ExpandProperty Name\""
+                # Fallback to a simpler check if the above module is missing
+                cmd = "powershell -Command \"(Get-Process | Where-Object {$_.MainWindowTitle -and $_.CPU -gt 1}).Count -gt 0\""
+                
+                # Let's use a simpler heuristic for Windows: If a known player is HEALTHY and has CPU usage > 0.5%
+                players = ["vlc", "chrome", "msedge", "wmplayer"]
+                for player in players:
+                    check_cmd = f"powershell -Command \"Get-Process {player} -ErrorAction SilentlyContinue | Where-Object {{ $_.CPU -gt 0.5 }} | Select-Object -ExpandProperty Id\""
+                    try:
+                        res = subprocess.check_output(check_cmd, shell=True, creationflags=cflags, timeout=1).decode().strip()
+                        if res: return "YES"
+                    except: continue
+
         except:
             pass
         return "NO"

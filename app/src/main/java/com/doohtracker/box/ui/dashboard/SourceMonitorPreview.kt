@@ -34,7 +34,7 @@ fun SourceMonitorPreview(
     modifier: Modifier = Modifier,
     signalMonitor: SignalMonitor,
     authorizedPort: String? = null,
-//    onTriggerPortSelection: () -> Unit
+    onTriggerPortSelection: () -> Unit
 ) {
     val metadata by signalMonitor.sourceMetadata.collectAsState(initial = null)
     
@@ -116,20 +116,20 @@ fun SourceMonitorPreview(
                     Text("Active Outputs: ", color = Color.Gray, fontSize = 12.sp)
                     Text(metadata!!.activePorts, color = Color.White, fontSize = 13.sp)
 
-//                    if (metadata!!.activePorts != "Internal/None") {
-//                        Spacer(modifier = Modifier.weight(1f))
-//                        IconButton(
-//                            onClick = { /* onTriggerPortSelection() */ },
-//                            modifier = Modifier.size(24.dp)
-//                        ) {
-//                            Icon(
-//                                imageVector = Icons.Default.Edit,
-//                                contentDescription = "Change Output",
-//                                tint = Color.Gray,
-//                                modifier = Modifier.size(14.dp)
-//                            )
-//                        }
-//                    }
+                    if (metadata!!.activePorts != "Internal/None") {
+                        Spacer(modifier = Modifier.weight(1f))
+                        IconButton(
+                            onClick = { onTriggerPortSelection() },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Change Output",
+                                tint = Color.Gray,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {

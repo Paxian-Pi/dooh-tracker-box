@@ -57,8 +57,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
-import androidx.tv.material3.Button
-import androidx.tv.material3.ButtonDefaults
+import androidx.tv.material3.Button as TvButton
+import androidx.tv.material3.ButtonDefaults as TvButtonDefaults
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Icon
@@ -66,6 +66,9 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
 import androidx.tv.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.foundation.layout.size
 import coil.compose.AsyncImage
 import com.doohtracker.box.ui.theme.StatusCyan
 import com.doohtracker.box.ui.theme.StatusGreen
@@ -300,9 +303,9 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             horizontalArrangement = Arrangement.End,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Button(
+                            TvButton(
                                 onClick = { showLogoutDialog = true },
-                                colors = ButtonDefaults.colors(
+                                colors = TvButtonDefaults.colors(
                                     containerColor = Color.Black,
                                     contentColor = Color.White
                                 ),
@@ -355,7 +358,8 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                         .fillMaxSize()
                                         .background(Color(0xFF1E2136)),
                                     signalMonitor = viewModel.signalMonitor,
-                                    authorizedPort = authorizedPort
+                                    authorizedPort = authorizedPort,
+                                    onTriggerPortSelection = { viewModel.triggerPortSelection() }
                                 )
                             }
 
@@ -410,8 +414,23 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
 
                             else -> {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    val text = if (anyCampaignActive) "Downloading campaigns..." else "No Active Content"
-                                    Text(text, color = Color.Gray)
+                                    val text = if (anyCampaignActive) {
+                                        when (sourceMonitorStatus) {
+                                            "Ready" -> "Waiting for Source Monitor Link..."
+                                            "No Media Detected" -> "Waiting for valid media transmission..."
+                                            "Window Closed" -> "No scheduled campaigns in this window"
+                                            else -> "Preparing campaigns..."
+                                        }
+                                    } else {
+                                        "No Active Content"
+                                    }
+                                    Text(
+                                        text = text,
+                                        color = Color.Gray,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(16.dp),
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
                                 }
                             }
                         }
@@ -483,12 +502,12 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             horizontalArrangement = Arrangement.spacedBy(16.dp),
                             modifier = Modifier.padding(top = 8.dp)
                         ) {
-                            Button(
+                            TvButton(
                                 onClick = {
                                     viewModel.logout()
                                     showLogoutDialog = false
                                 },
-                                colors = ButtonDefaults.colors(
+                                colors = TvButtonDefaults.colors(
                                     containerColor = Color.Black,
                                     contentColor = Color.White
                                 ),
@@ -501,7 +520,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             ) {
                                 Text("Logout & Wipe")
                             }
-                            Button(
+                            TvButton(
                                 onClick = { showLogoutDialog = false },
                                 modifier = Modifier.clickable { showLogoutDialog = false }
                             ) {
@@ -555,17 +574,19 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             horizontalArrangement = Arrangement.spacedBy(16.dp),
                             modifier = Modifier.padding(top = 8.dp)
                         ) {
-                            Button(
+                            TvButton(
                                 onClick = { viewModel.reboot() },
                                 modifier = Modifier
                                     .focusRequester(restartButtonFocusRequester)
-                                    .clickable { viewModel.reboot() }
+                                    .clickable { viewModel.reboot() },
+                                colors = TvButtonDefaults.colors()
                             ) {
                                 Text("Restart Now")
                             }
-                            Button(
+                            TvButton(
                                 onClick = { viewModel.dismissRestartDialog() },
-                                modifier = Modifier.clickable { viewModel.dismissRestartDialog() }
+                                modifier = Modifier.clickable { viewModel.dismissRestartDialog() },
+                                colors = TvButtonDefaults.colors()
                             ) {
                                 Text("Cancel")
                             }
@@ -580,65 +601,85 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.85f)),
+                    .background(Color.Black.copy(alpha = 0.9f))
+                    .clickable { /* Block clicks to background */ },
                 contentAlignment = Alignment.Center
             ) {
                 Surface(
-                    shape = MaterialTheme.shapes.medium,
-                    colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = SurfaceDefaults.colors(containerColor = Color(0xFF1E2136)),
                     modifier = Modifier
-                        .wrapContentSize()
-                        .padding(24.dp)
+                        .fillMaxWidth(0.7f)
+                        .widthIn(max = 400.dp)
+                        .padding(16.dp)
                 ) {
                     Column(
-                        modifier = Modifier.padding(32.dp),
+                        modifier = Modifier.padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Text(
-                            text = "Select Monitoring Port",
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Multiple outputs detected. Select the port that will transmit media to the screen.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown, 
+                            contentDescription = null,
+                            tint = StatusCyan,
+                            modifier = Modifier.size(40.dp)
                         )
                         
+                        Text(
+                            text = "Select Output Port",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
+                        )
+                        
+                        Text(
+                            text = "Choose the physical port connected to your DOOH screen:",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                            color = Color.LightGray
+                        )
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Scrollable list of ports for mobile friendliness
                         Column(
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier
-                                .widthIn(min = 250.dp, max = 400.dp)
-                                .heightIn(max = 300.dp)
+                                .fillMaxWidth()
                                 .verticalScroll(rememberScrollState())
-                                .padding(vertical = 8.dp)
+                                .heightIn(max = 250.dp)
                         ) {
-                            detectedPorts.forEach { port ->
-                                Button(
+                            detectedPorts.distinct().forEach { port ->
+                                androidx.compose.material3.Button(
                                     onClick = { viewModel.authorizePort(port) },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { viewModel.authorizePort(port) },
-                                    colors = ButtonDefaults.colors(
-                                        containerColor = if (authorizedPort == port)
-                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-                                            else Color(0xFF1E2136),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                        containerColor = if (authorizedPort == port) StatusCyan else Color.Black.copy(alpha = 0.3f),
                                         contentColor = Color.White
-                                    )
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
                                 ) {
                                     Row(
-                                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                                        horizontalArrangement = Arrangement.Center
+                                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(
-                                            text = port,
-                                            fontWeight = if (authorizedPort == port) FontWeight.Bold else FontWeight.Normal
-                                        )
+                                        Text(text = port, fontWeight = FontWeight.Medium)
+                                        if (authorizedPort == port) {
+                                            Text("Selected", style = MaterialTheme.typography.labelSmall)
+                                        }
                                     }
                                 }
                             }
+                        }
+
+                        androidx.compose.material3.Button(
+                            onClick = { viewModel.dismissPortDialog() },
+                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = Color.Gray),
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Text("Cancel")
                         }
                     }
                 }
@@ -759,7 +800,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier.padding(top = 8.dp)
                         ) {
-                            Button(
+                            androidx.compose.material3.Button(
                                 onClick = {
                                     val finalQuery = if (searchQuery == "All Campaigns") null else searchQuery
                                     viewModel.exportCampaignData(
@@ -781,7 +822,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             ) {
                                 Text("Export CSV")
                             }
-                            Button(
+                            androidx.compose.material3.Button(
                                 onClick = {
                                     val finalQuery = if (searchQuery == "All Campaigns") null else searchQuery
                                     viewModel.exportCampaignData(
@@ -801,7 +842,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             ) {
                                 Text("Export PDF")
                             }
-                            Button(
+                            androidx.compose.material3.Button(
                                 onClick = { showExportDialog = false },
                                 modifier = Modifier.clickable { showExportDialog = false }
                             ) {
