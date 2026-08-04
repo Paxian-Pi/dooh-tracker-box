@@ -11,11 +11,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.MaterialTheme
@@ -23,53 +18,17 @@ import androidx.tv.material3.Text
 import com.doohtracker.box.data.hardware.SignalMonitor
 import com.doohtracker.box.ui.theme.StatusCyan
 import com.doohtracker.box.ui.theme.StatusGreen
-import com.doohtracker.box.ui.theme.StatusRed
-import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
 fun SourceMonitorPreview(
     modifier: Modifier = Modifier,
-    signalMonitor: SignalMonitor,
-    authorizedPort: String? = null,
-    onTriggerPortSelection: () -> Unit
+    signalMonitor: SignalMonitor
 ) {
     val metadata by signalMonitor.sourceMetadata.collectAsState(initial = null)
-    
-    val metadataValue = metadata
-    val ports = metadataValue?.activePorts?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
-
-    // Check if authorized port mismatch warning should be shown:
-    // 1. Not shown if activePorts is "Internal/None"
-    // 2. Not shown if there is only one port available
-    // 3. Shown if multiple ports exist and the selected one is not among the active/transmitting ones
-    val isWarningVisible = metadataValue != null && 
-            metadataValue.activePorts != "Internal/None" &&
-            ports.size > 1 && 
-            authorizedPort != null && 
-            !ports.contains(authorizedPort)
-            
     val scrollState = rememberScrollState()
 
-    // UI state for smoothed transmission status
-    var displayedIsTransmitting by rememberSaveable { mutableStateOf(false) }
-
-    // Effect to apply 1-second delay to status changes for smoother UX
-    LaunchedEffect(metadata?.isTransmitting) {
-        val targetValue = metadata?.isTransmitting ?: false
-
-        if (metadataValue?.activePorts == "Internal/None") {
-            displayedIsTransmitting = false
-            return@LaunchedEffect
-        }
-        if (targetValue != displayedIsTransmitting) {
-            delay(500.milliseconds)
-            displayedIsTransmitting = targetValue
-        }
-    }
-    
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -108,47 +67,16 @@ fun SourceMonitorPreview(
                     Text("Status: ", color = Color.Gray, fontSize = 12.sp)
                     Text(metadata!!.status, color = if(metadata!!.status == "HEALTHY") StatusGreen else Color.Yellow, fontSize = 13.sp)
                 }
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Active Outputs: ", color = Color.Gray, fontSize = 12.sp)
-                    Text(metadata!!.activePorts, color = Color.White, fontSize = 13.sp)
-
-                    if (metadata!!.activePorts != "Internal/None") {
-                        Spacer(modifier = Modifier.weight(1f))
-                        IconButton(
-                            onClick = { onTriggerPortSelection() },
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Edit,
-                                contentDescription = "Change Output",
-                                tint = Color.Gray,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
-                    }
-                }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Media Stream: ", color = Color.Gray, fontSize = 12.sp)
+                    Text("Current File: ", color = Color.Gray, fontSize = 12.sp)
                     Text(
-                        if(displayedIsTransmitting) "TRANSMITTING" else "IDLE", 
-                        color = if(displayedIsTransmitting) StatusGreen else Color.Gray,
+                        metadata!!.mediaTitle, 
+                        color = Color.White,
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                // Authorized Port Mismatch Warning
-                if (isWarningVisible) {
-                    Text(
-                        text = "Warning: Wrong Port Selected (#$authorizedPort is not active)",
-                        color = Color(0xFFFFBF00), // Amber
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
                 }
                 

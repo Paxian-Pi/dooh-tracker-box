@@ -41,45 +41,27 @@ class HeartbeatServer @Inject constructor(
                     }
 
                     val message = String(packet.data, 0, packet.length)
-                    // Format: PULSE:{status}:{hostname}:{ports}:{timestamp}:{transmission}
                     Log.d("HeartbeatServer", "Received heartbeat from ${packet.address.hostAddress}: $message")
                     
                     val parts = message.split(":")
                     val metadata = if (parts.size >= 6 && parts[0] == "PULSE") {
+                        // Protocol: PULSE:STATUS:HOSTNAME:PORTS:TIMESTAMP:TRANSMITTING[:MEDIA_TITLE]
+                        val mediaTitle = if (parts.size >= 7) {
+                            // Reconstruct title in case it contained colons
+                            message.substringAfter(":").substringAfter(":").substringAfter(":")
+                                .substringAfter(":").substringAfter(":").substringAfter(":")
+                        } else {
+                            "NONE"
+                        }
+
                         SourceMetadata(
                             ipAddress = packet.address.hostAddress ?: "Unknown",
                             status = parts[1],
                             hostname = parts[2],
                             activePorts = parts[3],
                             isTransmitting = parts[5].trim().uppercase() == "YES",
+                            mediaTitle = mediaTitle,
                             lastSeen = parts[4].toLongOrNull() ?: System.currentTimeMillis()
-                        )
-                    } else if (parts.size >= 5 && parts[0] == "PULSE") {
-                        SourceMetadata(
-                            ipAddress = packet.address.hostAddress ?: "Unknown",
-                            status = parts[1],
-                            hostname = parts[2],
-                            activePorts = parts[3],
-                            isTransmitting = false,
-                            lastSeen = parts[4].toLongOrNull() ?: System.currentTimeMillis()
-                        )
-                    } else if (parts.size >= 4 && parts[0] == "PULSE") {
-                        SourceMetadata(
-                            ipAddress = packet.address.hostAddress ?: "Unknown",
-                            status = parts[1],
-                            hostname = parts[2],
-                            activePorts = parts[3],
-                            isTransmitting = false,
-                            lastSeen = System.currentTimeMillis()
-                        )
-                    } else if (parts.size >= 3 && parts[0] == "PULSE") {
-                        SourceMetadata(
-                            ipAddress = packet.address.hostAddress ?: "Unknown",
-                            status = parts[1],
-                            hostname = parts[2],
-                            activePorts = "Unknown",
-                            isTransmitting = false,
-                            lastSeen = System.currentTimeMillis()
                         )
                     } else {
                         SourceMetadata(
@@ -88,6 +70,7 @@ class HeartbeatServer @Inject constructor(
                             hostname = "Generic Source",
                             activePorts = "None",
                             isTransmitting = false,
+                            mediaTitle = "NONE",
                             lastSeen = System.currentTimeMillis()
                         )
                     }

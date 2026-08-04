@@ -15,5 +15,6 @@ data class SourceMetadata(
     val status: String = "ACTIVE",
     val activePorts: String = "None",
     val isTransmitting: Boolean = false,
+    val mediaTitle: String = "Unknown Content",
     val lastSeen: Long = System.currentTimeMillis()
 )

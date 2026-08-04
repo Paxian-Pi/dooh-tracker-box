@@ -9,5 +9,6 @@ data class TrackingLogEntity(
     val id: Int = 0,
     val campaignId: String,
     val timestamp: Long,
-    val isSynced: Boolean = false
+    val isSynced: Boolean = false,
+    val isComplianceRejected: Boolean = false
 )

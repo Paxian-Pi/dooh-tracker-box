@@ -28,4 +28,7 @@ interface CampaignDao {
 
     @Query("UPDATE campaigns SET lastHourlyTrackedAt = :time WHERE id = :campaignId")
     suspend fun updateLastHourlyTrackedAt(campaignId: String, time: Long)
+
+    @Query("UPDATE campaigns SET lastSeenOnBillboardAt = :time WHERE id = :campaignId")
+    suspend fun updateLastSeenOnBillboardAt(campaignId: String, time: Long)
 }

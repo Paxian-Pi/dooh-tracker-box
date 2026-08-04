@@ -14,7 +14,7 @@ import kotlin.time.Duration.Companion.milliseconds
 @Singleton
 class VerificationGatekeeper @Inject constructor(
     private val campaignRepository: CampaignRepository,
-    private val signalMonitor: SignalMonitor,
+    val signalMonitor: SignalMonitor,
     private val deviceManager: DeviceManager,
     private val timeProvider: TimeProvider
 ) {
@@ -35,24 +35,25 @@ class VerificationGatekeeper @Inject constructor(
             signalMonitor.isSourceActive,
             signalMonitor.sourceMetadata
         ) { activeCampaigns, isSourceActive, metadata ->
-            // Authorized Port Check
-            val authorizedPort = deviceManager.getAuthorizedPort()
-            val hasCorrectOutput = if (authorizedPort != null && metadata != null) {
-                metadata.activePorts.split(",").map { it.trim() }.contains(authorizedPort)
-            } else {
-                metadata?.activePorts != null && metadata.activePorts != "Internal/None"
-            }
-
-            // Refined Active Rules:
             // 1. Must have scheduled campaigns
-            val hasCampaigns = activeCampaigns.isNotEmpty()
+            if (activeCampaigns.isEmpty()) return@combine false
+            
             // 2. Source Monitor must be linked
-            val isLinked = isSourceActive
-            // 3. Must have the correct external output
-            // 4. Must be actively transmitting media
-            val isTransmitting = metadata?.isTransmitting == true
+            if (!isSourceActive || metadata == null) return@combine false
 
-            hasCampaigns && isLinked && hasCorrectOutput && isTransmitting
+            // 3. Content Verification Rule (Strict Matching)
+            // Verify that the billboard content exists in our SYSTEM (any downloaded campaign)
+            val reportedTitle = metadata.mediaTitle.lowercase()
+            val hasSystemMatch = campaignRepository.allCampaigns.first().any { campaign ->
+                val fileName = campaign.sourceFilename?.lowercase() ?: ""
+                val campaignName = campaign.name.lowercase()
+                
+                (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
+                reportedTitle.contains(campaignName)
+            } && reportedTitle != "none"
+
+            // Final Gate: Must be Linked + Trustworthy Content Match
+            hasSystemMatch
         }
     }.distinctUntilChanged()
 }

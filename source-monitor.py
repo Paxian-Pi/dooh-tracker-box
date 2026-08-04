@@ -8,6 +8,16 @@ import json
 import argparse
 import sys
 
+# Windows Media SDK Support
+HAS_WINSDK = False
+if platform.system() == "Windows":
+    try:
+        import asyncio
+        from winsdk.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
+        HAS_WINSDK = True
+    except ImportError:
+        pass
+
 try:
     import customtkinter as ctk
     from tkinter import messagebox
@@ -224,7 +234,7 @@ class SourceMonitorApp:
         remaining = int(max(0, 30 - elapsed))
         status = self.status_msg_var.get()
         if "Searching" in status:
-            text = f"Searching ({remaining}s)"
+            text = f"Resetting ({remaining}s)"
             color = "#FFBF00"
             if USE_CUSTOM_TK:
                 self.btn_toggle.configure(text=text, fg_color=color, text_color="black")
@@ -238,13 +248,13 @@ class SourceMonitorApp:
         cflags = 0x08000000 if system == "Windows" else 0
         if system == "Windows":
             cmd = 'tasklist /FI "STATUS eq RUNNING"'
-            players = ["vlc", "mpc-hc", "chrome", "wmplayer"]
+            players = ["vlc", "mpc-hc", "chrome", "wmplayer", "mpv", "gst-launch", "magicinfo", "webos"]
         elif system == "Darwin":
             cmd = 'ps -e'
-            players = ["vlc", "quicktime player", "iina", "chrome"]
+            players = ["vlc", "quicktime player", "iina", "chrome", "mpv", "gst-launch"]
         else:
             cmd = 'ps -e'
-            players = ["vlc", "mpv", "chrome"]
+            players = ["vlc", "mpv", "chrome", "gst-launch"]
         try:
             output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, creationflags=cflags, timeout=2).decode().lower()
             return any(player in output for player in players)
@@ -266,13 +276,13 @@ class SourceMonitorApp:
                 sp_out = ""
                 try: sp_out = subprocess.check_output(["system_profiler", "SPDisplaysDataType"], timeout=3).decode().upper()
                 except: pass
-                
+
                 # Look for specific connection signatures
                 if "HDMI" in ioreg_out or "HDMI" in sp_out: ports.append("HDMI")
                 if "DISPLAYPORT" in ioreg_out or "DISPLAYPORT" in sp_out: ports.append("DP/USB-C")
                 if "DVI" in ioreg_out or "DVI" in sp_out: ports.append("DVI")
                 if "VGA" in ioreg_out or "VGA" in sp_out: ports.append("VGA")
-                
+
                 # Fallback: Check if multiple displays are "Online" but type is generic
                 if not ports and sp_out.count("ONLINE: YES") > 1:
                     ports.append("External Monitor")
@@ -313,18 +323,12 @@ class SourceMonitorApp:
                 output = subprocess.check_output("powercfg /requests", shell=True, creationflags=cflags, timeout=2).decode().upper()
                 is_power_video = "DISPLAY:" in output and "NONE" not in output.split("DISPLAY:")[1].split("\n")[1]
                 is_power_audio = "AUDIO:" in output and "NONE" not in output.split("AUDIO:")[1].split("\n")[1]
-                
+
                 if is_power_video or is_power_audio:
                     return "YES"
 
-                # Strategy 2: Audio Session Check (Does any app have an active audio session?)
-                # This doesn't require admin and catches VLC/Chrome reliably
-                cmd = "powershell -Command \"Get-AudioDevice -Playback | Get-AudioDevice -List | Where-Object {$_.Type -eq 'Playback'} | Select-Object -ExpandProperty Name\""
-                # Fallback to a simpler check if the above module is missing
-                cmd = "powershell -Command \"(Get-Process | Where-Object {$_.MainWindowTitle -and $_.CPU -gt 1}).Count -gt 0\""
-                
-                # Let's use a simpler heuristic for Windows: If a known player is HEALTHY and has CPU usage > 0.5%
-                players = ["vlc", "chrome", "msedge", "wmplayer"]
+                # Strategy 2: Simple process heuristic for Windows: If a known player is HEALTHY and has CPU usage > 0.5%
+                players = ["vlc", "chrome", "msedge", "wmplayer", "mpv", "gst-launch", "magicinfo", "webos"]
                 for player in players:
                     check_cmd = f"powershell -Command \"Get-Process {player} -ErrorAction SilentlyContinue | Where-Object {{ $_.CPU -gt 0.5 }} | Select-Object -ExpandProperty Id\""
                     try:
@@ -336,6 +340,112 @@ class SourceMonitorApp:
             pass
         return "NO"
 
+    def get_current_media_title(self):
+        """Attempts to extract the title/filename of the media currently playing from common signage players."""
+        system = platform.system()
+        cflags = 0x08000000 if system == "Windows" else 0
+        try:
+            if system == "Darwin":
+                # macOS: Improved multi-player detection with explicit variable scoping
+                script = '''
+                set finalTitle to "NONE"
+                try
+                    tell application "System Events"
+                        set frontProcess to first application process whose frontmost is true
+                        set frontName to name of frontProcess
+                    end tell
+                    
+                    if frontName is "VLC" then
+                        tell application "VLC" to set finalTitle to name of current item
+                    else if frontName is "QuickTime Player" then
+                        tell application "QuickTime Player" to set finalTitle to name of document 1
+                    else if (frontName contains "Chrome") or (frontName contains "Chromium") then
+                        tell application "Google Chrome" to set finalTitle to title of active tab of window 1
+                    else if frontName contains "mpv" then
+                        tell application "System Events" to tell process frontName to set finalTitle to name of window 1
+                    else if frontName contains "Safari" then
+                        tell application "Safari" to set finalTitle to name of window 1
+                    else
+                        -- Check background players via System Events (Passive)
+                        tell application "System Events"
+                            if exists (application process "VLC") then
+                                tell application "VLC" to set finalTitle to name of current item
+                            else if exists (application process "mpv") then
+                                set finalTitle to name of window 1 of application process "mpv"
+                            end if
+                            if finalTitle is "NONE" and (exists (application process "QuickTime Player")) then
+                                tell application "QuickTime Player" to set finalTitle to name of document 1
+                            end if
+                        end tell
+
+                        -- Global Fallback: Get the title of the frontmost window (Common for custom signage players)
+                        if finalTitle is "NONE" then
+                            tell application "System Events"
+                                tell frontProcess
+                                    if (count of windows) > 0 then set finalTitle to name of window 1
+                                end tell
+                            end tell
+                        end if
+                    end if
+                on error
+                    set finalTitle to "NONE"
+                end try
+                return finalTitle
+                '''
+                title = subprocess.check_output(["osascript", "-e", script]).decode().strip()
+                # Filter out system UI titles
+                ignored = ["", "none", "desktop", "finder", "dock", "loginwindow", "system events", "control center", "siri", "notification center", "screen sharing"]
+                if title.lower() in ignored: return "NONE"
+                return title if len(title) > 2 else "NONE"
+
+            elif system == "Windows":
+                # Windows: Prioritized detection for signage players (mpv, VLC, Chrome, MagicINFO, etc.)
+                system_titles = ["task manager", "settings", "microsoft text input", "program manager", "calculator", "microsoft store", "windows input experience", "taskbar", "start"]
+
+                # 1. Direct Foreground Window Check (Best for Signage players in full-screen)
+                fg_cmd = 'powershell -Command "$sig = \'[DllImport(\\\"user32.dll\\\", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount); [DllImport(\\\"user32.dll\\\")] public static extern IntPtr GetForegroundWindow();\'; Add-Type -MemberDefinition $sig -Name Win32Utils -Namespace Win32; $hwnd = [Win32.Win32Utils]::GetForegroundWindow(); $sb = New-Object System.Text.StringBuilder 256; $null = [Win32.Win32Utils]::GetWindowText($hwnd, $sb, $sb.Capacity); $sb.ToString()"'
+                try:
+                    title = subprocess.check_output(fg_cmd, shell=True, creationflags=cflags, timeout=2).decode().strip()
+                    if title and len(title) > 3 and title.lower() not in system_titles:
+                        # Return if it looks like content (contains extension or isn't just the player name)
+                        if any(ext in title.lower() for ext in [".mp4", ".mov", ".avi", ".mkv", ".jpg", ".png", ".webp", ".html"]):
+                            return title
+                        # If it's MagicINFO or webOS signage, their window title often IS the content or playlist name
+                        if any(p in title.lower() for p in ["magicinfo", "webos", "signage", "brightsign", "player"]):
+                            return title
+                except: pass
+
+                # 2. Modern Media System (Chrome, modern WMP, Spotify)
+                smtc_cmd = 'powershell -Command "[Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime] | Out-Null; $m = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync().GetAwaiter().GetResult(); $s = $m.GetCurrentSession(); if ($s) { $p = $s.TryGetMediaPropertiesAsync().GetAwaiter().GetResult(); $p.Title }"'
+                try:
+                    smtc_title = subprocess.check_output(smtc_cmd, shell=True, creationflags=cflags, timeout=2).decode().strip()
+                    if smtc_title and len(smtc_title) > 2:
+                        return smtc_title
+                except: pass
+
+                # 3. Process Scan Fallback (Detects mpv, vlc, chromium, gst-launch, magicinfo)
+                cmd = "powershell -Command \"Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object -ExpandProperty MainWindowTitle\""
+                try:
+                    output = subprocess.check_output(cmd, shell=True, creationflags=cflags, timeout=3).decode().strip()
+                    if output:
+                        titles = output.split('\n')
+                        media_exts = [".mp4", ".mov", ".avi", ".mkv", ".jpg", ".jpeg", ".png", ".webp", ".html", "index"]
+                        # First pass: look for files
+                        for t in titles:
+                            t = t.strip()
+                            if any(ext in t.lower() for ext in media_exts):
+                                return t
+                        # Second pass: look for players
+                        players_keywords = ["mpv", "vlc", "chrome", "chromium", "gst-launch", "magicinfo", "webos", "brightsign"]
+                        for t in titles:
+                            t = t.strip()
+                            if any(k in t.lower() for k in players_keywords) and len(t) > 3:
+                                return t
+                except: pass
+        except:
+            pass
+        return "NONE"
+
     def monitoring_loop(self):
         while self.is_running:
             try:
@@ -346,7 +456,7 @@ class SourceMonitorApp:
                         self.log(f"🔄 Tracker IP for {site_id} changed or rediscovered: {found_ip}")
                         self.tracker_ip = found_ip
                     self.search_start_time = time.time()
-                
+
                 elapsed = time.time() - self.search_start_time
                 if elapsed > 30:
                     self.log(f"⚠️ Tracker not found for {site_id}. Resetting...")
@@ -363,17 +473,25 @@ class SourceMonitorApp:
                 status = "HEALTHY" if self.is_media_playing() else "NO_MEDIA"
                 active_ports = self.get_active_ports()
                 transmitting = self.check_transmission()
+                media_title = self.get_current_media_title()
+
+                # Sanitize media title for network transport (remove colons)
+                media_title = media_title.replace(":", "-").replace("\n", " ").strip()
+
                 if active_ports == "Internal/None": transmitting = "NO"
                 
                 source_time = int(time.time() * 1000)
-                message = f"PULSE:{status}:{platform.node()}:{active_ports}:{source_time}:{transmitting}"
+                # Protocol: PULSE:STATUS:HOSTNAME:PORTS:TIMESTAMP:TRANSMITTING:MEDIA_TITLE
+                message = f"PULSE:{status}:{platform.node()}:{active_ports}:{source_time}:{transmitting}:{media_title}"
 
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                     s.settimeout(2.0)
                     s.sendto(message.encode(), (self.tracker_ip, HEARTBEAT_PORT))
                     self.update_status(f"Status: Connected to {self.tracker_ip}")
+
                     if self.is_gui:
                         self.root.after(0, lambda: self.btn_toggle.configure(text="Stop Monitoring", fg_color="#dc3545", hover_color="#c82333", text_color="white") if USE_CUSTOM_TK else self.btn_toggle.config(text="Stop Monitoring", bg="red"))
+
                     self.search_start_time = time.time()
 
             except Exception as e:

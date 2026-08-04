@@ -48,7 +48,6 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     private val systemActions: SystemActions,
     private val locationMonitor: LocationMonitor,
     private val systemHealthMonitor: SystemHealthMonitor,
-    private val deviceManager: com.doohtracker.box.data.manager.DeviceManager,
     private val timeProvider: TimeProvider,
     val playbackManager: PlaybackManager
 ) : ViewModel() {
@@ -59,15 +58,6 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
 
     private val _onLogoutSuccess = MutableSharedFlow<Unit>()
     val onLogoutSuccess = _onLogoutSuccess.asSharedFlow()
-
-    private val _showPortSelectionDialog = MutableStateFlow(false)
-    val showPortSelectionDialog: StateFlow<Boolean> = _showPortSelectionDialog.asStateFlow()
-
-    private val _detectedPorts = MutableStateFlow<List<String>>(emptyList())
-    val detectedPorts: StateFlow<List<String>> = _detectedPorts.asStateFlow()
-
-    private val _authorizedPort = MutableStateFlow(deviceManager.getAuthorizedPort())
-    val authorizedPort: StateFlow<String?> = _authorizedPort.asStateFlow()
 
     private val timeTicker = flow {
         while (true) {
@@ -90,24 +80,25 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
         isSourceLinked,
         anyCampaignActive,
         campaignRepository.allCampaigns,
-        signalMonitor.sourceMetadata,
-        authorizedPort
-    ) { linked, anyActive, all, metadata, authorized ->
+        signalMonitor.sourceMetadata
+    ) { linked, anyActive, all, metadata ->
         when {
             linked -> {
-                if (anyActive) {
-                    val activePorts = metadata?.activePorts?.split(",")?.map { it.trim().uppercase() } ?: emptyList()
-                    val isTransmitting = metadata?.isTransmitting == true
-                    
-                    val hasAuthorizedPort = authorized != null && activePorts.contains(authorized.uppercase())
-                    
-                    when {
-                        hasAuthorizedPort && isTransmitting -> "Active"
-                        hasAuthorizedPort && !isTransmitting -> "No Media Detected"
-                        else -> "No Media Detected"
-                    }
+                val reportedTitle = metadata?.mediaTitle?.lowercase() ?: ""
+                
+                // User requirement: Active only if playing content is amongst ANY downloaded ones
+                val hasContentMatchInSystem = all.any { campaign ->
+                    val fileName = campaign.sourceFilename?.lowercase() ?: ""
+                    (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
+                    reportedTitle.contains(campaign.name.lowercase())
+                } && reportedTitle != "none"
+
+                if (hasContentMatchInSystem) {
+                    "Active"
+                } else if (reportedTitle == "none" || reportedTitle.isEmpty()) {
+                    "No Media Detected"
                 } else {
-                    "Window Closed"
+                    "Content Mismatch"
                 }
             }
             all.isNotEmpty() -> "Ready"
@@ -119,24 +110,6 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     val isHdmiStreamEnabled: StateFlow<Boolean> = _isHdmiStreamEnabled.asStateFlow()
 
     init {
-        // Automatically show dialog if a new output is detected and no port is authorized yet
-        signalMonitor.sourceMetadata
-            .onEach { metadata ->
-                val authorized = deviceManager.getAuthorizedPort()
-                if (metadata != null && metadata.activePorts != "Internal/None" && authorized == null) {
-                    val ports = metadata.activePorts.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                    
-                    if (ports.size == 1) {
-                        // Auto-select if only one port is available
-                        authorizePort(ports[0])
-                    } else if (ports.size > 1) {
-                        _detectedPorts.value = ports
-                        _showPortSelectionDialog.value = true
-                    }
-                }
-            }
-            .launchIn(viewModelScope)
-
         usbConnectionMonitor.onNewPermissionGranted
             .onEach {
                 val currentTime = timeProvider.getCurrentTimeMillis()
@@ -156,37 +129,6 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
 
     fun dismissRestartDialog() {
         _showRestartDialog.value = false
-    }
-
-    fun authorizePort(port: String) {
-        deviceManager.setAuthorizedPort(port)
-        _authorizedPort.value = port
-        _showPortSelectionDialog.value = false
-    }
-
-    fun dismissPortDialog() {
-        _showPortSelectionDialog.value = false
-    }
-
-    fun triggerPortSelection() {
-        viewModelScope.launch {
-            val metadata = signalMonitor.sourceMetadata.first()
-            if (metadata != null && metadata.activePorts != "Internal/None") {
-                val ports = metadata.activePorts.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                
-                if (ports.size == 1) {
-                    authorizePort(ports[0])
-                    Toast.makeText(context, "Port ${ports[0]} automatically selected", Toast.LENGTH_SHORT).show()
-                } else if (ports.size > 1) {
-                    _detectedPorts.value = ports
-                    _showPortSelectionDialog.value = true
-                } else {
-                    Toast.makeText(context, "No Active Ports found", Toast.LENGTH_LONG).show()
-                }
-            } else {
-                Toast.makeText(context, "No Active Ports to select from", Toast.LENGTH_LONG).show()
-            }
-        }
     }
 
     fun openLocationSettings() {
@@ -282,7 +224,8 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
             TrackingLogUiModel(
                 title = campaign?.name ?: "Campaign closed",
                 timestamp = log.timestamp,
-                isSynced = log.isSynced
+                isSynced = log.isSynced,
+                isComplianceRejected = log.isComplianceRejected
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -518,5 +461,6 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
 data class TrackingLogUiModel(
     val title: String,
     val timestamp: Long,
-    val isSynced: Boolean
+    val isSynced: Boolean,
+    val isComplianceRejected: Boolean = false
 )

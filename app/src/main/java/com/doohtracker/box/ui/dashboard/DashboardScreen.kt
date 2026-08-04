@@ -98,11 +98,9 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
     val anyCampaignActive by viewModel.anyCampaignActive.collectAsState()
     val systemHealth by viewModel.systemHealth.collectAsState()
     val currentMediaCampaign by viewModel.playbackManager.currentCampaign.collectAsState()
+    val mismatchedTitle by viewModel.playbackManager.mismatchedTitle.collectAsState()
     val isHdmiStreamEnabled by viewModel.isHdmiStreamEnabled.collectAsState()
     val siteId by viewModel.activationCode.collectAsState()
-    val showPortDialog by viewModel.showPortSelectionDialog.collectAsState()
-    val detectedPorts by viewModel.detectedPorts.collectAsState()
-    val authorizedPort by viewModel.authorizedPort.collectAsState()
 
     var showExportDialog by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
@@ -181,6 +179,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                 "Active" -> StatusGreen
                                 "Ready" -> StatusCyan
                                 "Window Closed" -> StatusYellow
+                                "Content Mismatch" -> Color(0xFFFFA500) // Orange
                                 "No Media Detected" -> Color(0xFF87CEEB) // Light Blue (Sky Blue)
                                 else -> StatusRed
                             },
@@ -341,6 +340,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
 
                         val mediaType = when {
                             isSourceLinked && isHdmiStreamEnabled -> "hdmi"
+                            mismatchedTitle != null -> "mismatch"
                             campaign == null -> "none"
                             campaign.mediaType?.lowercase() == "image" ||
                                     campaign.mediaUrl?.lowercase()?.let {
@@ -357,10 +357,34 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .background(Color(0xFF1E2136)),
-                                    signalMonitor = viewModel.signalMonitor,
-                                    authorizedPort = authorizedPort,
-                                    onTriggerPortSelection = { viewModel.triggerPortSelection() }
+                                    signalMonitor = viewModel.signalMonitor
                                 )
+                            }
+
+                            "mismatch" -> {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color(0xFF2C1E1E)), // Dark Red background
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            "UNAUTHORIZED CONTENT", 
+                                            color = StatusRed, 
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            mismatchedTitle ?: "", 
+                                            color = Color.White,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.padding(horizontal = 16.dp),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
                             }
 
                             "image" -> {
@@ -596,95 +620,6 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
             }
         }
 
-        // Port Selection Dialog Overlay
-        if (showPortDialog) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.9f))
-                    .clickable { /* Block clicks to background */ },
-                contentAlignment = Alignment.Center
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    colors = SurfaceDefaults.colors(containerColor = Color(0xFF1E2136)),
-                    modifier = Modifier
-                        .fillMaxWidth(0.7f)
-                        .widthIn(max = 400.dp)
-                        .padding(16.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowDropDown, 
-                            contentDescription = null,
-                            tint = StatusCyan,
-                            modifier = Modifier.size(40.dp)
-                        )
-                        
-                        Text(
-                            text = "Select Output Port",
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center
-                        )
-                        
-                        Text(
-                            text = "Choose the physical port connected to your DOOH screen:",
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center,
-                            color = Color.LightGray
-                        )
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // Scrollable list of ports for mobile friendliness
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .verticalScroll(rememberScrollState())
-                                .heightIn(max = 250.dp)
-                        ) {
-                            detectedPorts.distinct().forEach { port ->
-                                androidx.compose.material3.Button(
-                                    onClick = { viewModel.authorizePort(port) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                                        containerColor = if (authorizedPort == port) StatusCyan else Color.Black.copy(alpha = 0.3f),
-                                        contentColor = Color.White
-                                    ),
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().padding(8.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(text = port, fontWeight = FontWeight.Medium)
-                                        if (authorizedPort == port) {
-                                            Text("Selected", style = MaterialTheme.typography.labelSmall)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        androidx.compose.material3.Button(
-                            onClick = { viewModel.dismissPortDialog() },
-                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = Color.Gray),
-                            modifier = Modifier.padding(top = 8.dp)
-                        ) {
-                            Text("Cancel")
-                        }
-                    }
-                }
-            }
-        }
 
         // Custom Export Dialog Overlay
         if (showExportDialog) {
@@ -1062,8 +997,16 @@ fun LogItem(log: TrackingLogUiModel) {
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = if (log.isSynced) "✓" else "☁",
-                color = if (log.isSynced) StatusGreen else Color.Gray,
+                text = when {
+                    log.isComplianceRejected -> "❌"
+                    log.isSynced -> "✓"
+                    else -> "☁"
+                },
+                color = when {
+                    log.isComplianceRejected -> StatusRed
+                    log.isSynced -> StatusGreen
+                    else -> Color.Gray
+                },
                 style = MaterialTheme.typography.bodyMedium
             )
         }

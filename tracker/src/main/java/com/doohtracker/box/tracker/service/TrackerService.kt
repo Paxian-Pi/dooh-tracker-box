@@ -51,17 +51,36 @@ class TrackerService : Service() {
 
     private fun observeTrackingLogic() {
         serviceScope.launch {
+            // High-frequency Pulse Listener (Every 2 seconds via network)
+            gatekeeper.signalMonitor.sourceMetadata.collect { metadata ->
+                if (metadata != null) {
+                    val location = locationMonitor.currentLocation.first()
+                    val locationString = if (location != null) {
+                        "${location.latitude}, ${location.longitude}"
+                    } else ""
+
+                    campaignRepository.processBillboardPulse(
+                        currentTime = timeProvider.getCurrentTimeMillis(),
+                        metadata = metadata,
+                        locationString = locationString
+                    )
+                }
+            }
+        }
+
+        serviceScope.launch {
+            // General status observer for UI/Start-Stop
             gatekeeper.isTrackingAllowed.collect { allowed ->
                 if (allowed) {
-                    startTrackingLoop()
+                    startCompliancePoller()
                 } else {
-                    stopTrackingLoop()
+                    stopCompliancePoller()
                 }
             }
         }
     }
 
-    private fun startTrackingLoop() {
+    private fun startCompliancePoller() {
         if (trackingJob?.isActive == true) return
         trackingJob = serviceScope.launch {
             while (isActive) {
@@ -70,11 +89,11 @@ class TrackerService : Service() {
                     "${location.latitude}, ${location.longitude}"
                 } else ""
 
+                // This now only handles background compliance (❌ logs for missing ads)
                 campaignRepository.trackCurrentCampaigns(
                     currentTime = timeProvider.getCurrentTimeMillis(),
                     locationString = locationString
                 )
-                // Check for new pings every minute
                 delay(60000.milliseconds) 
             }
         }
@@ -90,7 +109,7 @@ class TrackerService : Service() {
         }
     }
 
-    private fun stopTrackingLoop() {
+    private fun stopCompliancePoller() {
         trackingJob?.cancel()
         trackingJob = null
     }

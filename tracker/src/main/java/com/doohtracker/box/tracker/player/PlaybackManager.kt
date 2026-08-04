@@ -27,8 +27,7 @@ import kotlin.time.Duration.Companion.seconds
 class PlaybackManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val campaignRepository: CampaignRepository,
-    private val gatekeeper: VerificationGatekeeper,
-    private val timeProvider: TimeProvider
+    private val gatekeeper: VerificationGatekeeper
 ) {
     private val playerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     
@@ -38,8 +37,9 @@ class PlaybackManager @Inject constructor(
     private val _currentCampaign = MutableStateFlow<CampaignEntity?>(null)
     val currentCampaign = _currentCampaign.asStateFlow()
 
-    private val fullPlaylist = mutableListOf<CampaignEntity>()
-    private var currentIndex = 0
+    private val _mismatchedTitle = MutableStateFlow<String?>(null)
+    val mismatchedTitle = _mismatchedTitle.asStateFlow()
+
     private var isPlaying = false
     private var imageTimerJob: Job? = null
     
@@ -57,22 +57,14 @@ class PlaybackManager @Inject constructor(
             _player = ExoPlayer.Builder(context, renderersFactory)
                 .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
                 .build().apply {
-                    repeatMode = Player.REPEAT_MODE_OFF 
+                    repeatMode = Player.REPEAT_MODE_ALL // Repeat the same item until title changes
                     addListener(object : Player.Listener {
                         override fun onRenderedFirstFrame() {
                             Log.d("Playback", "SUCCESS: Video frame rendered for current item!")
                         }
 
-                        override fun onPlaybackStateChanged(state: Int) {
-                            if (state == Player.STATE_ENDED) {
-                                Log.d("Playback", "ExoPlayer: Video ended.")
-                                handleItemFinished()
-                            }
-                        }
-
                         override fun onPlayerError(error: PlaybackException) {
                             Log.e("Playback", "ExoPlayer Error: ${error.message} (Code: ${error.errorCode})", error)
-                            handleItemFinished()
                         }
                     })
                 }
@@ -80,42 +72,41 @@ class PlaybackManager @Inject constructor(
             Log.e("Playback", "ExoPlayer Init Error", e)
         }
         
-        startPlaylistMonitor()
+        startLiveMirrorMonitor()
     }
 
-    private fun startPlaylistMonitor() {
+    private fun startLiveMirrorMonitor() {
         playerScope.launch {
-            // Observe tracking allowed state
-            gatekeeper.isTrackingAllowed.collectLatest { isAllowed ->
-                if (!isAllowed) {
-                    Log.d("Playback", "Tracking not allowed. Stopping player.")
+            // Observe the billboard's current title from the Source Monitor
+            gatekeeper.signalMonitor.sourceMetadata.collectLatest { metadata ->
+                val reportedTitle = metadata?.mediaTitle?.lowercase() ?: "none"
+                
+                if (reportedTitle == "none") {
+                    _mismatchedTitle.value = null
                     stopPlayback()
                     return@collectLatest
                 }
 
-                // If allowed, run the playlist maintenance loop
-                while (isActive) {
-                    val now = timeProvider.getCurrentTimeMillis()
-                    val active = campaignRepository.allCampaigns.first().filter { 
-                        it.startTime <= now && it.endTime >= now && 
-                        !it.mediaUrl.isNullOrBlank() && !it.localPath.isNullOrBlank()
+                // Find a match in our system
+                val allCampaigns = campaignRepository.allCampaigns.first()
+                val matchedCampaign = allCampaigns.find { campaign ->
+                    val fileName = campaign.sourceFilename?.lowercase() ?: ""
+                    val campaignName = campaign.name.lowercase()
+                    (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
+                    reportedTitle.contains(campaignName)
+                }
+
+                if (matchedCampaign != null) {
+                    _mismatchedTitle.value = null
+                    if (_currentCampaign.value?.id != matchedCampaign.id) {
+                        Log.d("Playback", "Billboard Title Changed -> ${matchedCampaign.name}. Mirroring...")
+                        playCampaign(matchedCampaign)
                     }
-                    
-                    if (active.map { it.id } != fullPlaylist.map { it.id }) {
-                        Log.d("Playback", "Playlist Updated. Syncing ${active.size} campaigns.")
-                        fullPlaylist.clear()
-                        fullPlaylist.addAll(active)
-                        if (!isPlaying && fullPlaylist.isNotEmpty()) {
-                            currentIndex = 0
-                            startCurrentItem()
-                        }
-                    }
-                    
-                    if (!isPlaying && fullPlaylist.isNotEmpty()) {
-                        startCurrentItem()
-                    }
-                    
-                    delay(15.seconds)
+                } else {
+                    // Mismatched: Billboard is playing something we don't have media for
+                    Log.d("Playback", "Billboard playing unrecognized content: $reportedTitle. Alerting monitor.")
+                    stopPlayback()
+                    _mismatchedTitle.value = metadata?.mediaTitle ?: "Unknown File"
                 }
             }
         }
@@ -127,20 +118,10 @@ class PlaybackManager @Inject constructor(
         _player?.clearMediaItems()
         _currentCampaign.value = null
         isPlaying = false
-        fullPlaylist.clear()
     }
 
-    private fun startCurrentItem() {
+    private fun playCampaign(campaign: CampaignEntity) {
         imageTimerJob?.cancel()
-        if (fullPlaylist.isEmpty()) {
-            _currentCampaign.value = null
-            isPlaying = false
-            return
-        }
-
-        if (currentIndex >= fullPlaylist.size) currentIndex = 0
-        
-        val campaign = fullPlaylist[currentIndex]
         _currentCampaign.value = campaign
         isPlaying = true
 
@@ -150,13 +131,10 @@ class PlaybackManager @Inject constructor(
                               url.endsWith(".png") || url.endsWith(".webp")
 
         if (isExplicitImage) {
-            Log.d("Playback", "Playing IMAGE: ${campaign.name}")
-            imageTimerJob = playerScope.launch {
-                delay(5.seconds)
-                handleItemFinished()
-            }
+            Log.d("Playback", "Mirroring IMAGE: ${campaign.name}")
+            // No timer needed, will stay on screen until collectLatest triggers next change
         } else {
-            Log.d("Playback", "Playing VIDEO: ${campaign.name} -> ${campaign.mediaUrl}")
+            Log.d("Playback", "Mirroring VIDEO: ${campaign.name}")
             _player?.let { p ->
                 val uri = campaign.localPath?.let { android.net.Uri.fromFile(java.io.File(it)) }
                     ?: android.net.Uri.parse(campaign.mediaUrl)
@@ -169,33 +147,6 @@ class PlaybackManager @Inject constructor(
                 p.play()
             }
         }
-    }
-
-    private fun handleItemFinished() {
-        if (!isPlaying) return // Ignore if we've been stopped manually or via gatekeeper
-
-        val finishedCampaign = _currentCampaign.value ?: return
-        
-        // Capture duration on Main thread before switching to IO
-        val durationMs = if (finishedCampaign.mediaType?.lowercase() == "image") {
-            5000L
-        } else {
-            _player?.duration ?: 0L
-        }
-
-        playerScope.launch(Dispatchers.IO) {
-            val isAllowed = gatekeeper.isTrackingAllowed.first()
-            if (isAllowed) {
-                val durationSeconds = (durationMs / 1000.0).roundToLong()
-                campaignRepository.trackPlayback(finishedCampaign.id, durationSeconds)
-            } else {
-                Log.d("Playback", "Tracking skipped for ${finishedCampaign.name} (Source Monitor not Active)")
-            }
-        }
-
-        // Cycle next
-        currentIndex++
-        startCurrentItem()
     }
 
     fun release() {

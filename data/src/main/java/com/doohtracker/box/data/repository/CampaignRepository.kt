@@ -13,6 +13,7 @@ import com.doohtracker.box.data.remote.MediaDownloader
 import com.doohtracker.box.data.time.TimeProvider
 import com.doohtracker.box.data.util.baseUrl
 import com.doohtracker.box.data.hardware.SignalMonitor
+import com.doohtracker.box.data.hardware.SourceMetadata
 import com.doohtracker.box.data.hardware.UsbConnectionMonitor
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
@@ -36,6 +37,11 @@ class CampaignRepository @Inject constructor(
 ) {
     val allCampaigns: Flow<List<CampaignEntity>> = campaignDao.getAllCampaigns()
     val recentLogs: Flow<List<TrackingLogEntity>> = trackingLogDao.getRecentLogs()
+
+    // Session Tracking variables
+    private var activeSessionCampaignId: String? = null
+    private var activeSessionStartTime: Long = 0L
+    private var lastPulseTime: Long = 0L
 
     fun isDeviceActivated(): Boolean = deviceManager.isActivated()
     fun getActivationCode(): String = deviceManager.getActivationCode()
@@ -105,6 +111,8 @@ class CampaignRepository @Inject constructor(
                     val entities = matchedResults.map { dto ->
                         val entity = dto.toEntity().normalizeUrl()
                         
+                        val sourceFilename = entity.mediaUrl?.substringAfterLast("/")?.substringBefore("?")
+                        
                         // Download media if not already present
                         val localFile = entity.mediaUrl?.let { url ->
                             mediaDownloader.downloadMedia(url, entity.id)
@@ -114,10 +122,14 @@ class CampaignRepository @Inject constructor(
                         if (existing != null) {
                             entity.copy(
                                 syncedCount = existing.syncedCount,
+                                sourceFilename = sourceFilename ?: existing.sourceFilename,
                                 localPath = localFile?.absolutePath ?: existing.localPath
                             )
                         } else {
-                            entity.copy(localPath = localFile?.absolutePath)
+                            entity.copy(
+                                sourceFilename = sourceFilename,
+                                localPath = localFile?.absolutePath
+                            )
                         }
                     }
                     campaignDao.insertCampaigns(entities)
@@ -151,11 +163,103 @@ class CampaignRepository @Inject constructor(
         return this.copy(mediaUrl = finalUrl)
     }
 
+    suspend fun processBillboardPulse(currentTime: Long, metadata: SourceMetadata, locationString: String) {
+        val reportedTitle = metadata.mediaTitle.lowercase()
+        val allCampaignsNow = campaignDao.getAllCampaigns().first()
+
+        // 1. Find the campaign matching current physical output
+        val matchedCampaign = allCampaignsNow.find { campaign ->
+            val fileName = campaign.sourceFilename?.lowercase() ?: ""
+            val campaignName = campaign.name.lowercase()
+            (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || reportedTitle.contains(campaignName)
+        }?.takeIf { reportedTitle != "none" }
+
+        val newCampaignId = matchedCampaign?.id
+
+        // 2. Logic: Handle Session Changes OR Hourly Boundary Crossings
+        val currentHour = SimpleDateFormat("HH", Locale.getDefault()).format(Date(currentTime))
+        val sessionStartHour = if (activeSessionStartTime > 0) {
+            SimpleDateFormat("HH", Locale.getDefault()).format(Date(activeSessionStartTime))
+        } else currentHour
+
+        val hasContentChanged = newCampaignId != activeSessionCampaignId
+        val hasHourChanged = currentHour != sessionStartHour
+
+        if (hasContentChanged || hasHourChanged) {
+            // A. Finalize previous session
+            if (activeSessionCampaignId != null) {
+                val finishedCampaign = allCampaignsNow.find { it.id == activeSessionCampaignId }
+                if (finishedCampaign != null) {
+                    val durationSeconds = (currentTime - activeSessionStartTime) / 1000L
+                    if (durationSeconds >= 2) { 
+                        Log.d("Tracking", "Finalizing session (Hour change or Content change) for ${finishedCampaign.name}")
+                        sendTrackingPulse(finishedCampaign, currentTime, locationString, durationSeconds, true)
+                    }
+                }
+            }
+
+            // B. Start new session (or restart for same ad in new hour)
+            activeSessionCampaignId = newCampaignId
+            activeSessionStartTime = currentTime
+            
+            if (newCampaignId != null) {
+                Log.d("Tracking", "Started session for ${matchedCampaign?.name}")
+                campaignDao.updateLastSeenOnBillboardAt(newCampaignId, currentTime)
+            }
+        } else if (newCampaignId != null) {
+            // C. Maintain current session
+            campaignDao.updateLastSeenOnBillboardAt(newCampaignId, currentTime)
+        }
+
+        lastPulseTime = currentTime
+    }
+
     suspend fun trackCurrentCampaigns(currentTime: Long, locationString: String) {
         val activeCampaigns = campaignDao.getActiveCampaigns(currentTime).first()
+        val metadata = signalMonitor.sourceMetadata.first()
+        val reportedTitle = metadata?.mediaTitle?.lowercase() ?: ""
+
+        val rotationGracePeriod = 10 * 60 * 1000L 
+        val suspensionThreshold = 20 * 60 * 1000L
+
+        // Handle Heartbeat Timeout (Billboard player closed suddenly)
+        if (currentTime - lastPulseTime > 10000 && activeSessionCampaignId != null) {
+            Log.d("Tracking", "Billboard signal lost. Closing active session.")
+            processBillboardPulse(currentTime, SourceMetadata(mediaTitle = "none"), locationString)
+        }
+
         activeCampaigns.forEach { campaign ->
-            // Trigger both PoP and Hourly tracking at the same time
-            sendTrackingPulse(campaign, currentTime, locationString, 60)
+            val fileName = campaign.sourceFilename?.lowercase() ?: ""
+            val campaignName = campaign.name.lowercase()
+            val isCurrentMatch = (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
+                                 reportedTitle.contains(campaignName)
+
+            // Update last seen to keep it from being suspended,
+            // but we DO NOT send a tracking pulse here. 
+            // Pulses are sent only when the session ends in processBillboardPulse().
+            if (isCurrentMatch && reportedTitle != "none") {
+                campaignDao.updateLastSeenOnBillboardAt(campaign.id, currentTime)
+            }
+
+            // Only generate ❌ logs here for ads that are NOT currently playing
+            if (!isCurrentMatch || reportedTitle == "none") {
+                val timeSinceSeen = currentTime - campaign.lastSeenOnBillboardAt
+                val isMissingFromRotation = campaign.lastSeenOnBillboardAt != 0L && timeSinceSeen > rotationGracePeriod
+                val isNewAndNotShowing = campaign.lastSeenOnBillboardAt == 0L && timeSinceSeen > rotationGracePeriod
+
+                if ((isMissingFromRotation || isNewAndNotShowing) && timeSinceSeen < suspensionThreshold) {
+                    if (reportedTitle != "none") {
+                        trackingLogDao.insertLog(
+                            TrackingLogEntity(
+                                campaignId = campaign.id,
+                                timestamp = currentTime,
+                                isSynced = false,
+                                isComplianceRejected = true
+                            )
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -163,8 +267,23 @@ class CampaignRepository @Inject constructor(
         campaign: CampaignEntity,
         currentTime: Long,
         locationString: String,
-        durationSeconds: Long
+        durationSeconds: Long,
+        bypassContentCheck: Boolean = false
     ) {
+        if (!bypassContentCheck) {
+            // Safety valve for manual calls: Ensure content actually matches billboard
+            val metadata = signalMonitor.sourceMetadata.first()
+            val reportedTitle = metadata?.mediaTitle?.lowercase() ?: ""
+            val fileName = campaign.sourceFilename?.lowercase() ?: ""
+            val isMatch = (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
+                         reportedTitle.contains(campaign.name.lowercase())
+            
+            if (!isMatch || reportedTitle == "none") {
+                Log.d("Tracking", "Pulse rejected for ${campaign.name}: Content Mismatch")
+                return
+            }
+        }
+
         val now = Date(currentTime)
         val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
@@ -231,21 +350,6 @@ class CampaignRepository @Inject constructor(
             Log.e("Tracking", "Tracking pulse failed for ${campaign.id}", e)
             trackingLogDao.insertLog(TrackingLogEntity(campaignId = campaign.id, timestamp = currentTime, isSynced = false))
         }
-    }
-
-    suspend fun trackPlayback(campaignId: String, durationSeconds: Long) {
-        val isSignalActive = signalMonitor.isSourceActive.first()
-        if (!isSignalActive) return
-
-        val campaigns = campaignDao.getAllCampaigns().first()
-        val campaign = campaigns.find { it.id == campaignId } ?: return
-        
-        sendTrackingPulse(
-            campaign = campaign,
-            currentTime = timeProvider.getCurrentTimeMillis(),
-            locationString = deviceManager.getInstallationNotes(),
-            durationSeconds = durationSeconds
-        )
     }
 
     suspend fun syncPendingLogs() {
