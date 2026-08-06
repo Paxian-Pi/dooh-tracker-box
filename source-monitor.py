@@ -234,7 +234,7 @@ class SourceMonitorApp:
         remaining = int(max(0, 30 - elapsed))
         status = self.status_msg_var.get()
         if "Searching" in status:
-            text = f"Resetting ({remaining}s)"
+            text = f"Resetting in ({remaining}s)"
             color = "#FFBF00"
             if USE_CUSTOM_TK:
                 self.btn_toggle.configure(text=text, fg_color=color, text_color="black")
