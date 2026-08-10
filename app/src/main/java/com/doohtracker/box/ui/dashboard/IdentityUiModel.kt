@@ -10,5 +10,6 @@ data class IdentityUiModel(
     val currentCampaign: String,
     val downloadedCount: Int,
     val mediaTitle: String = "NONE",
-    val isMismatched: Boolean = false
+    val isMismatched: Boolean = false,
+    val isDownloading: Boolean = false
 )

@@ -24,9 +24,11 @@ import java.util.*
 @Composable
 fun SourceMonitorPreview(
     modifier: Modifier = Modifier,
-    signalMonitor: SignalMonitor
+    signalMonitor: SignalMonitor,
+    siteId: String? = null
 ) {
-    val metadata by signalMonitor.sourceMetadata.collectAsState(initial = null)
+    val allMetadata by signalMonitor.allSourceMetadata.collectAsState(initial = emptyMap())
+    val metadata = if (siteId != null) allMetadata[siteId] else allMetadata.values.firstOrNull()
     val scrollState = rememberScrollState()
 
     Box(
@@ -55,23 +57,23 @@ fun SourceMonitorPreview(
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Machine: ", color = Color.Gray, fontSize = 12.sp)
-                    Text(metadata!!.hostname, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(metadata.hostname, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("IP Address: ", color = Color.Gray, fontSize = 12.sp)
-                    Text(metadata!!.ipAddress, color = StatusCyan, fontSize = 13.sp)
+                    Text(metadata.ipAddress, color = StatusCyan, fontSize = 13.sp)
                 }
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Status: ", color = Color.Gray, fontSize = 12.sp)
-                    Text(metadata!!.status, color = if(metadata!!.status == "HEALTHY") StatusGreen else Color.Yellow, fontSize = 13.sp)
+                    Text(metadata.status, color = if(metadata.status == "HEALTHY") StatusGreen else Color.Yellow, fontSize = 13.sp)
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Current File: ", color = Color.Gray, fontSize = 12.sp)
                     Text(
-                        metadata!!.mediaTitle, 
+                        metadata.mediaTitle, 
                         color = Color.White,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
@@ -83,7 +85,7 @@ fun SourceMonitorPreview(
                 val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Source Pulse: ", color = Color.Gray, fontSize = 11.sp)
-                    Text(sdf.format(Date(metadata!!.lastSeen)), color = Color.White.copy(alpha = 0.9f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(sdf.format(Date(metadata.lastSeen)), color = Color.White.copy(alpha = 0.9f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         } else {

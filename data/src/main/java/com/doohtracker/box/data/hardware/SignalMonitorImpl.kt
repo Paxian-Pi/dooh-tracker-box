@@ -23,34 +23,38 @@ class SignalMonitorImpl @Inject constructor(
     private val _isSourceActive = MutableStateFlow(false)
     override val isSourceActive: StateFlow<Boolean> = _isSourceActive.asStateFlow()
 
-    private val _sourceMetadata = MutableStateFlow<SourceMetadata?>(null)
-    override val sourceMetadata: StateFlow<SourceMetadata?> = _sourceMetadata.asStateFlow()
+    private val _allSourceMetadata = MutableStateFlow<Map<String, SourceMetadata>>(emptyMap())
+    override val allSourceMetadata: StateFlow<Map<String, SourceMetadata>> = _allSourceMetadata.asStateFlow()
 
     private val _isCameraAvailable = MutableStateFlow(false)
     
-    private var lastHeartbeatTime = 0L
+    private val heartbeatTimestamps = mutableMapOf<String, Long>()
 
-    override fun reportHeartbeat(metadata: SourceMetadata?) {
+    override fun reportHeartbeat(siteId: String, metadata: SourceMetadata) {
         val now = System.currentTimeMillis()
         
-        // Ownership Lock: If we have an active source, only allow heartbeats from the SAME hostname
-        val currentMetadata = _sourceMetadata.value
-        val isCurrentlyActive = (now - lastHeartbeatTime) < 5000
+        // Ownership Lock Per Site ID: only allow heartbeats from the SAME hostname for that Site ID
+        val currentMap = _allSourceMetadata.value
+        val existingMetadata = currentMap[siteId]
+        val lastSeen = heartbeatTimestamps[siteId] ?: 0L
+        val isCurrentlyActive = (now - lastSeen) < 10000 // Increased grace period to 10s
         
-        if (isCurrentlyActive && currentMetadata != null && metadata != null) {
-            if (currentMetadata.hostname != metadata.hostname) {
-                // Ignore heartbeats from other machines while the current one is active
-                Log.w("SignalMonitor", "Rejected heartbeat from ${metadata.hostname}. ${currentMetadata.hostname} is currently active.")
+        if (isCurrentlyActive && existingMetadata != null) {
+            if (existingMetadata.hostname != metadata.hostname) {
+                // This Site ID is already "Occupied" by another machine
+                Log.w("SignalMonitor", "Rejected heartbeat for $siteId from ${metadata.hostname}. Owned by ${existingMetadata.hostname}")
                 return
             }
         }
 
-        lastHeartbeatTime = now
-        if (metadata != null) {
-            _sourceMetadata.value = metadata
-        }
+        heartbeatTimestamps[siteId] = now
+        val newMap = currentMap.toMutableMap()
+        newMap[siteId] = metadata.copy(siteId = siteId, lastSeen = now)
+        _allSourceMetadata.value = newMap
+
         if (!_isSourceActive.value) {
             _isSourceActive.value = true
+            Log.d("SignalMonitor", "Signal activated by Site ID: $siteId")
         }
     }
 
@@ -63,28 +67,48 @@ class SignalMonitorImpl @Inject constructor(
             }
 
             override fun onCameraUnavailable(cameraId: String) {
-                // If it's unavailable because WE are using it, don't set to false
             }
         }, Handler(Looper.getMainLooper()))
 
-        // Monitor for heartbeat timeouts
+        // Monitor for heartbeat timeouts across ALL identities
         monitorScope.launch {
             while (isActive) {
                 val now = System.currentTimeMillis()
-                if (now - lastHeartbeatTime > 5000) { // Increased tolerance to 5s
-                    if (_isSourceActive.value) {
-                        _isSourceActive.value = false
+                val currentMap = _allSourceMetadata.value
+                val newMap = currentMap.toMutableMap()
+                var anyActive = false
+
+                val iterator = heartbeatTimestamps.entries.iterator()
+                while (iterator.hasNext()) {
+                    val entry = iterator.next()
+                    if (now - entry.value > 15000) { // Increased to 15s to prevent flickering
+                        newMap.remove(entry.key)
+                        iterator.remove()
+                    } else {
+                        anyActive = true
                     }
                 }
-                delay(1000.milliseconds)
+
+                if (newMap.size != currentMap.size) {
+                    _allSourceMetadata.value = newMap
+                }
+                
+                // Final Inactive Check: Only set to false if the Hub has been silent for 30s
+                if (!anyActive && _isSourceActive.value) {
+                    val longestSilent = heartbeatTimestamps.values.maxOrNull() ?: 0L
+                    if (now - longestSilent > 30000) {
+                        _isSourceActive.value = false
+                        Log.d("SignalMonitor", "Hub went silent for 30s. Setting inactive.")
+                    }
+                }
+                
+                delay(2000.milliseconds)
             }
         }
     }
 
-    // Directly use the specialized UsbConnectionMonitor state
     override val isUsbConnected: Flow<Boolean> = usbConnectionMonitor.isUsbDeviceConnected
 
-    // A signal is "Technically Active" if the USB is connected and the Camera is ready in the OS
     val isTechnicallyActive: Flow<Boolean> = combine(isUsbConnected, _isCameraAvailable) { usb, cam ->
         usb && cam
     }

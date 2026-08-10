@@ -4,43 +4,17 @@ import android.widget.Toast
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.*
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Switch
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -50,10 +24,13 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
@@ -66,9 +43,6 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
 import androidx.tv.material3.Text
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.foundation.layout.size
 import coil.compose.AsyncImage
 import com.doohtracker.box.ui.theme.StatusCyan
 import com.doohtracker.box.ui.theme.StatusGreen
@@ -84,6 +58,7 @@ import kotlin.time.Duration.Companion.milliseconds
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun DashboardScreen(viewModel: DashboardViewModel) {
+    val identities by viewModel.identities.collectAsState()
     val isSourceLinked by viewModel.isSourceLinked.collectAsState()
     val sourceMonitorStatus by viewModel.sourceMonitorStatus.collectAsState()
     val isConnected by viewModel.isConnected.collectAsState()
@@ -99,8 +74,9 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
     val systemHealth by viewModel.systemHealth.collectAsState()
     val currentMediaCampaign by viewModel.playbackManager.currentCampaign.collectAsState()
     val mismatchedTitle by viewModel.playbackManager.mismatchedTitle.collectAsState()
-    val isHdmiStreamEnabled by viewModel.isHdmiStreamEnabled.collectAsState()
+    val isSourcePreviewEnabled by viewModel.isSourcePreviewEnabled.collectAsState()
     val siteId by viewModel.activationCode.collectAsState()
+    val isHubSyncing by viewModel.isHubSyncing.collectAsState()
 
     var showExportDialog by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
@@ -112,10 +88,10 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
 
     val context = LocalContext.current
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        shape = RectangleShape,
+        colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.background)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
@@ -139,7 +115,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "DOOH Tracker Dashboard",
+                            text = "DOOH Tracker Hub",
                             style = MaterialTheme.typography.headlineSmall,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -148,24 +124,40 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             Text(
                                 text = "Source Preview",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = if (isHdmiStreamEnabled && sourceMonitorStatus != "Inactive") MaterialTheme.colorScheme.primary else Color.Gray,
+                                color = if (isSourcePreviewEnabled && isSourceLinked) MaterialTheme.colorScheme.primary else Color.Gray,
                                 modifier = Modifier.padding(end = 8.dp)
                             )
                             Switch(
-                                checked = isHdmiStreamEnabled && sourceMonitorStatus != "Inactive",
-                                onCheckedChange = { viewModel.toggleHdmiStream(it) },
+                                checked = isSourcePreviewEnabled && isSourceLinked,
+                                onCheckedChange = { viewModel.toggleSourcePreview(it) },
                                 modifier = Modifier.scale(0.8f)
                             )
                         }
                     }
 
-                    // Row 1: IP Address
-                    Text(
-                        text = "IP Address: $localIp",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(bottom = 2.dp)
-                    )
+                    // Row 1: IP Address with Add Site ID Button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "IP Address: $localIp",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
+                        TvButton(
+                            onClick = { viewModel.startAddIdentity() },
+                            colors = TvButtonDefaults.colors(
+                                containerColor = Color.DarkGray,
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.clickable { viewModel.startAddIdentity() }
+                        ) {
+                            Text(modifier = Modifier.padding(horizontal = 3.dp, vertical = 2.dp), text = "Add New Site ID")
+                        }
+                    }
 
                     // Row 2: Core Connectivity
                     Row(
@@ -178,9 +170,8 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             color = when (sourceMonitorStatus) {
                                 "Active" -> StatusGreen
                                 "Ready" -> StatusCyan
-                                "Window Closed" -> StatusYellow
-                                "Content Mismatch" -> Color(0xFFFFA500) // Orange
-                                "No Media Detected" -> Color(0xFF87CEEB) // Light Blue (Sky Blue)
+                                "Content Mismatch" -> Color(0xFFFFA500)
+                                "No Media" -> Color(0xFF87CEEB)
                                 else -> StatusRed
                             },
                             modifier = Modifier.weight(1f)
@@ -194,8 +185,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         )
 
                         StatusCard(
-                            title = "Site ID",
-//                            info = "IP: $localIp",
+                            title = "Primary Site ID",
                             status = siteId,
                             color = Color.White,
                             modifier = Modifier.weight(1f)
@@ -223,28 +213,39 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         )
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        if (!anyCampaignActive) {
-                            val spots by viewModel.dailySpotsSummary.collectAsState()
-                            StatusCard(
-                                title = "Total Spots Within Campaign Window",
-                                info = "Export to PDF/CSV",
-                                status = spots,
-                                color = StatusCyan,
-                                modifier = Modifier.weight(1.5f),
-                                isScrolling = true,
-                                onClick = {
-                                    if (spots == "No spots today") {
-                                        Toast.makeText(context, "No spots to export today", Toast.LENGTH_LONG).show()
-                                    } else showExportDialog = true
-                                }
-                            )
+                    // MULTI-SITE LIST SECTION (New, integrated into the scroll flow)
+                    if (identities.isNotEmpty()) {
+                        Text(
+                            text = "Active Multi-Site Identities (${identities.size})",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        identities.forEach { identity ->
+                            IdentityHubCard(identity, onRemove = { viewModel.removeSite(it) })
                         }
                     }
 
-                    // Row 4: Location and Sync/Spots
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        val spots by viewModel.dailySpotsSummary.collectAsState()
+                        StatusCard(
+                            title = "Total Spots Today",
+                            info = "Export to PDF/CSV",
+                            status = spots,
+                            color = StatusCyan,
+                            modifier = Modifier.fillMaxWidth(),
+                            isScrolling = true,
+                            onClick = {
+                                if (spots == "No spots today") {
+                                    Toast.makeText(context, "No spots to export today", Toast.LENGTH_LONG).show()
+                                } else showExportDialog = true
+                            }
+                        )
+                    }
+
+                    // Row 4: Location and Sync
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -257,15 +258,13 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             onClick = { viewModel.openLocationSettings() }
                         )
 
-                        if (!anyCampaignActive) {
-                            StatusCard(
-                                title = "Last Sync",
-                                status = lastSyncTime,
-                                color = StatusCyan,
-                                modifier = Modifier.weight(1f),
-                                onClick = { viewModel.openDateTimeSettings() }
-                            )
-                        }
+                        StatusCard(
+                            title = "Last Sync",
+                            status = lastSyncTime,
+                            color = StatusCyan,
+                            modifier = Modifier.weight(1f),
+                            onClick = { viewModel.openDateTimeSettings() }
+                        )
                     }
 
                     // Row 5: System Health
@@ -279,14 +278,12 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             color = Color.White,
                             modifier = Modifier.weight(1f)
                         )
-
                         StatusCard(
                             title = "Storage",
                             status = systemHealth?.storageUsage ?: "Checking...",
                             color = Color.White,
                             modifier = Modifier.weight(1f)
                         )
-
                         StatusCard(
                             title = "Uptime",
                             status = systemHealth?.uptime ?: "Checking...",
@@ -295,27 +292,39 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         )
                     }
 
-                    if (!anyCampaignActive) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End,
-                            verticalAlignment = Alignment.CenterVertically
+                    // Bottom Action Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+//                        TvButton(
+//                            onClick = { showLogoutDialog = true },
+//                            colors = TvButtonDefaults.colors(
+//                                containerColor = Color.Black,
+//                                contentColor = Color.White
+//                            ),
+//                            modifier = Modifier
+//                                .scale(0.9f)
+//                                .clickable { showLogoutDialog = true }
+//                                .background(Color.Black, shape = RoundedCornerShape(25.dp))
+//                        ) {
+//                            Text(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), text = "Wipe All Data")
+//                        }
+
+                        TvButton(
+                            onClick = { showLogoutDialog = true },
+                            colors = TvButtonDefaults.colors(
+                                containerColor = Color.DarkGray,
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.clickable { showLogoutDialog = true }
                         ) {
-                            TvButton(
-                                onClick = { showLogoutDialog = true },
-                                colors = TvButtonDefaults.colors(
-                                    containerColor = Color.Black,
-                                    contentColor = Color.White
-                                ),
-                                modifier = Modifier
-                                    .scale(0.9f)
-                                    .clickable { showLogoutDialog = true }
-                                    .background(Color.Black, shape = RoundedCornerShape(10.dp))
-                            ) {
-                                Text(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), text = "Re-activate Device")
-                            }
+                            Text(modifier = Modifier.padding(horizontal = 3.dp, vertical = 2.dp), text = "Wipe All Data")
                         }
+
                     }
                 }
 
@@ -339,8 +348,9 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         val campaign = currentMediaCampaign
 
                         val mediaType = when {
-                            isSourceLinked && isHdmiStreamEnabled -> "hdmi"
+                            isHubSyncing -> "syncing"
                             mismatchedTitle != null -> "mismatch"
+                            isSourceLinked && isSourcePreviewEnabled -> "mirror"
                             campaign == null -> "none"
                             campaign.mediaType?.lowercase() == "image" ||
                                     campaign.mediaUrl?.lowercase()?.let {
@@ -352,12 +362,52 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         }
 
                         when (mediaType) {
-                            "hdmi" -> {
+                            "syncing" -> {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color(0xFF1E2136)),
+                                    contentAlignment = Alignment.TopStart
+                                ) {
+                                    Column(modifier = Modifier.padding(16.dp)) {
+                                        Text(
+                                            "Campaign Reference",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = StatusCyan,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        identities.forEach { identity ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 4.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text(
+                                                    identity.siteId,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = Color.White
+                                                )
+                                                Text(
+                                                    if (identity.isDownloading) "Downloading..." else "Done",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = if (identity.isDownloading) StatusYellow else StatusGreen,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            "mirror" -> {
                                 SourceMonitorPreview(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .background(Color(0xFF1E2136)),
-                                    signalMonitor = viewModel.signalMonitor
+                                    signalMonitor = viewModel.signalMonitor,
+                                    siteId = currentMediaCampaign?.campaignTag
                                 )
                             }
 
@@ -365,19 +415,19 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .background(Color(0xFF2C1E1E)), // Dark Red background
+                                        .background(Color(0xFF2C1E1E)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                         Text(
-                                            "UNAUTHORIZED CONTENT", 
-                                            color = StatusRed, 
+                                            "UNAUTHORIZED CONTENT",
+                                            color = StatusRed,
                                             fontWeight = FontWeight.Bold,
                                             style = MaterialTheme.typography.labelLarge
                                         )
                                         Spacer(modifier = Modifier.height(8.dp))
                                         Text(
-                                            mismatchedTitle ?: "", 
+                                            mismatchedTitle ?: "",
                                             color = Color.White,
                                             textAlign = TextAlign.Center,
                                             modifier = Modifier.padding(horizontal = 16.dp),
@@ -388,7 +438,6 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             }
 
                             "image" -> {
-                                // Use a nested crossfade for image-to-image transitions
                                 Crossfade(targetState = campaign, label = "ImageTransition") { imgCampaign ->
                                     val imageModel = imgCampaign?.localPath ?: imgCampaign?.mediaUrl
                                     AsyncImage(
@@ -397,16 +446,15 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .background(Color.Black),
-                                        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                                        contentScale = ContentScale.Fit
                                     )
                                 }
                             }
 
                             "video" -> {
-                                // For videos, we keep the SAME AndroidView to avoid flashes
                                 AndroidView(
-                                    factory = { context ->
-                                        PlayerView(context).apply {
+                                    factory = { ctx ->
+                                        PlayerView(ctx).apply {
                                             player = playbackManager.player
                                             useController = false
                                             @Suppress("DEPRECATION")
@@ -415,7 +463,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                             setBackgroundColor(android.graphics.Color.BLACK)
                                             try {
                                                 val method = javaClass.getMethod("setSurfaceType", Int::class.javaPrimitiveType)
-                                                method.invoke(this, 2) // SURFACE_TYPE_TEXTURE_VIEW
+                                                method.invoke(this, 2)
                                             } catch (e: Exception) {
                                             }
                                             setKeepContentOnPlayerReset(true)
@@ -426,23 +474,19 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                         .fillMaxSize()
                                         .background(Color.Black),
                                     update = { view ->
-                                        if (view.player != playbackManager.player) {
-                                            view.player = playbackManager.player
-                                        }
+                                        if (view.player != playbackManager.player) view.player = playbackManager.player
                                     },
-                                    onRelease = { view ->
-                                        view.player = null
-                                    }
+                                    onRelease = { view -> view.player = null }
                                 )
                             }
 
                             else -> {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     val text = if (anyCampaignActive) {
-                                        when (sourceMonitorStatus) {
-                                            "Ready" -> "Waiting for Source Monitor Link..."
-                                            "No Media Detected" -> "Waiting for valid media transmission..."
-                                            "Window Closed" -> "No scheduled campaigns in this window"
+                                        when {
+                                            !isSourcePreviewEnabled -> "Source Preview Disabled"
+                                            !isSourceLinked -> "Waiting for Source Monitor Link..."
+                                            identities.any { it.status == "No Media" } -> "Waiting for valid media transmission..."
                                             else -> "Preparing campaigns..."
                                         }
                                     } else {
@@ -468,15 +512,11 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                     )
 
                     Surface(
-                        onClick = { showLogoutDialog = true },
                         modifier = Modifier
                             .weight(1f)
                             .clickable { showLogoutDialog = true },
-                        shape = ClickableSurfaceDefaults.shape(RectangleShape),
-                        colors = ClickableSurfaceDefaults.colors(
-                            containerColor = Color(0xFF1E2136),
-                            contentColor = Color.White
-                        )
+                        shape = RectangleShape,
+                        colors = SurfaceDefaults.colors(containerColor = Color(0xFF1E2136), contentColor = Color.White)
                     ) {
                         LogsList(logs)
                     }
@@ -484,309 +524,100 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
             }
         }
 
-        // Custom Logout Dialog Overlay
+        // Dialogs
         if (showLogoutDialog) {
-            LaunchedEffect(Unit) {
-                logoutButtonFocusRequester.requestFocus()
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.85f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Surface(
-                    shape = MaterialTheme.shapes.medium,
-                    colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier
-                        .wrapContentSize()
-                        .padding(24.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .padding(32.dp)
-                            .widthIn(max = 450.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        Text(
-                            text = "Re-activate Device?",
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            textAlign = TextAlign.Center
-                        )
-                        Text(
-                            text = "This will wipe all device credentials, delete downloaded campaigns, and clear all logs. You will need to reactivate the device.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            modifier = Modifier.padding(top = 8.dp)
-                        ) {
-                            TvButton(
-                                onClick = {
-                                    viewModel.logout()
-                                    showLogoutDialog = false
-                                },
-                                colors = TvButtonDefaults.colors(
-                                    containerColor = Color.Black,
-                                    contentColor = Color.White
-                                ),
-                                modifier = Modifier
-                                    .focusRequester(logoutButtonFocusRequester)
-                                    .clickable {
-                                        viewModel.logout()
-                                        showLogoutDialog = false
-                                    }
-                            ) {
-                                Text("Logout & Wipe")
-                            }
-                            TvButton(
-                                onClick = { showLogoutDialog = false },
-                                modifier = Modifier.clickable { showLogoutDialog = false }
-                            ) {
-                                Text("Cancel")
-                            }
-                        }
-                    }
-                }
-            }
+            LogoutDialog(
+                onDismiss = { showLogoutDialog = false },
+                onConfirm = { viewModel.logout() },
+                focusRequester = logoutButtonFocusRequester
+            )
         }
-
-        // Custom Restart Dialog Overlay
         if (showRestartDialog) {
-            LaunchedEffect(Unit) {
-                restartButtonFocusRequester.requestFocus()
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.85f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Surface(
-                    shape = MaterialTheme.shapes.medium,
-                    colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier
-                        .wrapContentSize()
-                        .padding(24.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .padding(32.dp)
-                            .widthIn(max = 450.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        Text(
-                            text = "Restart Required",
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            textAlign = TextAlign.Center
-                        )
-                        Text(
-                            text = "A new USB Video device has been authorized. Please restart the device to apply changes correctly.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            modifier = Modifier.padding(top = 8.dp)
-                        ) {
-                            TvButton(
-                                onClick = { viewModel.reboot() },
-                                modifier = Modifier
-                                    .focusRequester(restartButtonFocusRequester)
-                                    .clickable { viewModel.reboot() },
-                                colors = TvButtonDefaults.colors()
-                            ) {
-                                Text("Restart Now")
-                            }
-                            TvButton(
-                                onClick = { viewModel.dismissRestartDialog() },
-                                modifier = Modifier.clickable { viewModel.dismissRestartDialog() },
-                                colors = TvButtonDefaults.colors()
-                            ) {
-                                Text("Cancel")
-                            }
-                        }
-                    }
-                }
-            }
+            RestartDialog(
+                onDismiss = { viewModel.dismissRestartDialog() },
+                onConfirm = { viewModel.reboot() },
+                focusRequester = restartButtonFocusRequester
+            )
         }
-
-
-        // Custom Export Dialog Overlay
         if (showExportDialog) {
-            val allCampaigns by viewModel.allCampaignsList.collectAsState()
-            var searchQuery by remember { mutableStateOf("") }
-            var selectedCampaignId by remember { mutableStateOf<String?>(null) }
-            var dropdownExpanded by remember { mutableStateOf(false) }
+            ExportDialog(
+                viewModel = viewModel,
+                onDismiss = { showExportDialog = false },
+                focusRequester = exportButtonFocusRequester
+            )
+        }
+    }
+}
 
-            val filteredCampaigns = remember(searchQuery, allCampaigns) {
-                if (searchQuery.isBlank()) allCampaigns
-                else allCampaigns.filter { it.name.contains(searchQuery, ignoreCase = true) }
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun IdentityHubCard(identity: IdentityUiModel, onRemove: (String) -> Unit) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        colors = SurfaceDefaults.colors(containerColor = Color(0xFF1E2136)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = identity.siteId,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(text = "User: ${identity.username}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            }
+            Column(modifier = Modifier.weight(1.5f)) {
+                Row {
+                    Text(
+                        text = identity.status,
+                        color = identity.statusColor,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(" | ", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text(
+                        text = identity.mediaTitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (identity.isMismatched) StatusRed else Color.Gray,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 100.dp)
+                    )
+                }
+                AutoScrollingText(
+                    text = identity.currentCampaign,
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelSmall
+                )
             }
 
-            LaunchedEffect(Unit) {
-                exportButtonFocusRequester.requestFocus()
-            }
-
-            Box(
+            // Site ID Remove Button
+            Surface(
+                onClick = { onRemove(identity.siteId) },
+                shape = ClickableSurfaceDefaults.shape(CircleShape),
+                colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent, contentColor = StatusRed),
                 modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.85f)),
-                contentAlignment = Alignment.Center
+                    .size(24.dp)
+                    .clickable { onRemove(identity.siteId) }
             ) {
-                Surface(
-                    shape = MaterialTheme.shapes.medium,
-                    colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier
-                        .wrapContentSize()
-                        .widthIn(max = 500.dp)
-                        .padding(24.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        Text(
-                            text = "Export Campaign Report",
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            textAlign = TextAlign.Center
-                        )
-
-                        // Search Field
-                        TextField(
-                            value = searchQuery,
-                            onValueChange = {
-                                searchQuery = it
-                                selectedCampaignId = null // Clear ID if user types to allow variant search
-                            },
-                            label = { Text("Search Campaigns...") },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color(0xFF1E2136),
-                                unfocusedContainerColor = Color(0xFF1E2136),
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            trailingIcon = {
-                                androidx.compose.material3.IconButton(onClick = { dropdownExpanded = true }) {
-                                    Icon(
-                                        imageVector = Icons.Default.ArrowDropDown,
-                                        contentDescription = "Dropdown",
-                                        tint = Color.White
-                                    )
-                                }
-                            }
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Box(modifier = Modifier.weight(1f)) {
-                                Button(
-                                    onClick = { dropdownExpanded = true },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text("Select from List")
-                                }
-                                DropdownMenu(
-                                    expanded = dropdownExpanded,
-                                    onDismissRequest = { dropdownExpanded = false },
-                                    modifier = Modifier
-                                        .width(300.dp)
-                                        .background(Color(0xFF1E2136))
-                                ) {
-                                    filteredCampaigns.forEach { campaign ->
-                                        DropdownMenuItem(
-                                            text = { Text(campaign.name, color = Color.White) },
-                                            onClick = {
-                                                selectedCampaignId = campaign.id
-                                                searchQuery = campaign.name
-                                                dropdownExpanded = false
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-
-                            Button(
-                                onClick = {
-                                    selectedCampaignId = null
-                                    searchQuery = "All Campaigns"
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Select All")
-                            }
-                        }
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.padding(top = 8.dp)
-                        ) {
-                            androidx.compose.material3.Button(
-                                onClick = {
-                                    val finalQuery = if (searchQuery == "All Campaigns") null else searchQuery
-                                    viewModel.exportCampaignData(
-                                        "csv",
-                                        selectedCampaignId,
-                                        finalQuery.takeIf { it?.isNotBlank() == true })
-                                    showExportDialog = false
-                                },
-                                modifier = Modifier
-                                    .focusRequester(exportButtonFocusRequester)
-                                    .clickable {
-                                        val finalQuery = if (searchQuery == "All Campaigns") null else searchQuery
-                                        viewModel.exportCampaignData(
-                                            "csv",
-                                            selectedCampaignId,
-                                            finalQuery.takeIf { it?.isNotBlank() == true })
-                                        showExportDialog = false
-                                    }
-                            ) {
-                                Text("Export CSV")
-                            }
-                            androidx.compose.material3.Button(
-                                onClick = {
-                                    val finalQuery = if (searchQuery == "All Campaigns") null else searchQuery
-                                    viewModel.exportCampaignData(
-                                        "pdf",
-                                        selectedCampaignId,
-                                        finalQuery.takeIf { it?.isNotBlank() == true })
-                                    showExportDialog = false
-                                },
-                                modifier = Modifier.clickable {
-                                    val finalQuery = if (searchQuery == "All Campaigns") null else searchQuery
-                                    viewModel.exportCampaignData(
-                                        "pdf",
-                                        selectedCampaignId,
-                                        finalQuery.takeIf { it?.isNotBlank() == true })
-                                    showExportDialog = false
-                                }
-                            ) {
-                                Text("Export PDF")
-                            }
-                            androidx.compose.material3.Button(
-                                onClick = { showExportDialog = false },
-                                modifier = Modifier.clickable { showExportDialog = false }
-                            ) {
-                                Text("Cancel")
-                            }
-                        }
-                    }
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Remove Site ID",
+                        tint = Color.Gray,
+                        modifier = Modifier.scale(0.8f)
+                    )
+                    Text("✕", color = Color.White.copy(alpha = 0.1f), fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
             }
+            //
         }
     }
 }
@@ -803,106 +634,104 @@ fun StatusCard(
     onClick: (() -> Unit)? = null,
     trailing: @Composable (() -> Unit)? = null
 ) {
-    Surface(
-        onClick = onClick ?: {},
-        modifier = modifier.then(
-            if (onClick != null) {
-                Modifier.clickable(
-                    enabled = true,
-                    onClick = onClick
-                )
-            } else Modifier
-        ),
-        shape = ClickableSurfaceDefaults.shape(MaterialTheme.shapes.medium),
-        colors = ClickableSurfaceDefaults.colors(
-            containerColor = Color(0xFF1E2136),
-            contentColor = Color.White
-        )
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(12.dp)
-                .fillMaxWidth()
+    if (onClick != null) {
+        Surface(
+            onClick = onClick,
+            modifier = modifier.clickable { onClick() },
+            shape = ClickableSurfaceDefaults.shape(MaterialTheme.shapes.medium),
+            colors = ClickableSurfaceDefaults.colors(containerColor = Color(0xFF1E2136), contentColor = Color.White)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.Gray
-                )
-                if (info != null) {
-                    Text(
-                        text = info,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.Gray
-                    )
-                }
-                trailing?.invoke()
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            if (isScrolling) {
-                AutoScrollingText(
-                    text = status,
-                    color = color,
-                    style = MaterialTheme.typography.bodyLarge
-                )
-            } else {
-                Text(
-                    text = status,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = color,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                )
-            }
+            StatusCardContent(title, info, status, color, isScrolling, trailing)
+        }
+    } else {
+        Surface(
+            modifier = modifier,
+            shape = MaterialTheme.shapes.medium,
+            colors = SurfaceDefaults.colors(containerColor = Color(0xFF1E2136), contentColor = Color.White)
+        ) {
+            StatusCardContent(title, info, status, color, isScrolling, trailing)
         }
     }
 }
 
 @Composable
-fun AutoScrollingText(
-    text: String,
+private fun StatusCardContent(
+    title: String,
+    info: String?,
+    status: String,
     color: Color,
-    style: androidx.compose.ui.text.TextStyle
+    isScrolling: Boolean,
+    trailing: @Composable (() -> Unit)?
 ) {
-    val scrollState = rememberScrollState()
+    Column(
+        modifier = Modifier
+            .padding(12.dp)
+            .fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = title, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            if (info != null) Text(text = info, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            trailing?.invoke()
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        if (isScrolling) AutoScrollingText(text = status, color = color, style = MaterialTheme.typography.bodyLarge)
+        else Text(
+            text = status,
+            style = MaterialTheme.typography.bodyLarge,
+            color = color,
+            fontWeight = FontWeight.Bold,
+            maxLines = 2,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
+    }
+}
 
-    // Simple marquee effect
-    LaunchedEffect(text) {
-        while (true) {
-            delay(2000.milliseconds)
-            scrollState.animateScrollTo(
-                value = scrollState.maxValue,
-                animationSpec = tween(
-                    durationMillis = (scrollState.maxValue * 15).coerceAtLeast(1000),
-                    easing = LinearEasing
+@Composable
+fun AutoScrollingText(text: String, color: Color, style: androidx.compose.ui.text.TextStyle) {
+    val scrollState = rememberScrollState()
+    var interactionCount by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(text, interactionCount) {
+        if (scrollState.maxValue > 0) {
+            // If user just interacted, wait 1 second. 
+            // Otherwise, we start the normal cycle.
+            if (interactionCount > 0) {
+                delay(1000.milliseconds)
+            }
+
+            while (true) {
+                delay(2000.milliseconds)
+                scrollState.animateScrollTo(
+                    value = scrollState.maxValue,
+                    animationSpec = tween(
+                        durationMillis = (scrollState.maxValue * 15).coerceAtLeast(1000),
+                        easing = LinearEasing
+                    )
                 )
-            )
-            delay(2000.milliseconds)
-            scrollState.scrollTo(0)
+                delay(2000.milliseconds)
+                scrollState.scrollTo(0)
+            }
         }
     }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(scrollState, enabled = false)
+            .horizontalScroll(scrollState, enabled = true)
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent()
+                        interactionCount++
+                    }
+                }
+            }
     ) {
-        Text(
-            text = text,
-            style = style,
-            color = color,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            softWrap = false
-        )
+        Text(text = text, style = style, color = color, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
     }
 }
 
@@ -914,13 +743,11 @@ fun LogsList(logs: List<TrackingLogUiModel>) {
         }
     } else {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Header Row
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .background(Color.Black.copy(alpha = 0.2f)),
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .background(Color.Black.copy(alpha = 0.2f)), horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
                     "Campaign",
@@ -933,32 +760,25 @@ fun LogsList(logs: List<TrackingLogUiModel>) {
                     "Time & Sync",
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.weight(1f),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                    textAlign = TextAlign.End,
                     color = Color.Gray
                 )
             }
-
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                items(logs) { log ->
-                    LogItem(log)
-                }
+                items(logs) { log -> LogItem(log) }
             }
         }
     }
 }
 
-@OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun LogItem(log: TrackingLogUiModel) {
     val dateSdf = SimpleDateFormat("MMM dd", Locale.getDefault())
     val timeSdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-    val date = dateSdf.format(Date(log.timestamp))
-    val time = timeSdf.format(Date(log.timestamp))
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -966,7 +786,6 @@ fun LogItem(log: TrackingLogUiModel) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Column 1: Campaign Title
         Text(
             text = log.title,
             style = MaterialTheme.typography.bodySmall,
@@ -975,40 +794,231 @@ fun LogItem(log: TrackingLogUiModel) {
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             color = Color.White
         )
-
-        // Column 2: Date
         Text(
-            text = date,
+            text = dateSdf.format(Date(log.timestamp)),
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.weight(0.8f),
             color = Color.LightGray
         )
-
-        // Column 3: Time & Synced
         Row(
             modifier = Modifier.weight(1f),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = time,
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.LightGray
-            )
+            Text(text = timeSdf.format(Date(log.timestamp)), style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = when {
-                    log.isComplianceRejected -> "❌"
-                    log.isSynced -> "✓"
-                    else -> "☁"
-                },
-                color = when {
-                    log.isComplianceRejected -> StatusRed
-                    log.isSynced -> StatusGreen
-                    else -> Color.Gray
-                },
+                text = if (log.isComplianceRejected) "❌" else if (log.isSynced) "✓" else "☁",
+                color = if (log.isComplianceRejected) StatusRed else if (log.isSynced) StatusGreen else Color.Gray,
                 style = MaterialTheme.typography.bodyMedium
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun LogoutDialog(onDismiss: () -> Unit, onConfirm: () -> Unit, focusRequester: FocusRequester) {
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f)), contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+            modifier = Modifier
+                .wrapContentSize()
+                .padding(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(32.dp)
+                    .widthIn(max = 450.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(text = "Re-activate Device?", style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    text = "This will wipe all device credentials, delete downloaded campaigns, and clear all logs.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    TvButton(
+                        onClick = onConfirm,
+                        modifier = Modifier
+                            .focusRequester(focusRequester)
+                            .clickable { onConfirm() }
+                    ) { Text("Logout & Wipe") }
+                    TvButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.clickable { onDismiss() }
+                    ) { Text("Cancel") }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun RestartDialog(onDismiss: () -> Unit, onConfirm: () -> Unit, focusRequester: FocusRequester) {
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f)), contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+            modifier = Modifier
+                .wrapContentSize()
+                .padding(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(32.dp)
+                    .widthIn(max = 450.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(text = "Restart Required", style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    text = "A new USB Video device has been authorized. Please restart the device.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    TvButton(
+                        onClick = onConfirm,
+                        modifier = Modifier
+                            .focusRequester(focusRequester)
+                            .clickable { onConfirm() }
+                    ) { Text("Restart Now") }
+                    TvButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.clickable { onDismiss() }
+                    ) { Text("Cancel") }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun ExportDialog(viewModel: DashboardViewModel, onDismiss: () -> Unit, focusRequester: FocusRequester) {
+    val allCampaigns by viewModel.allCampaignsList.collectAsState()
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedCampaignId by remember { mutableStateOf<String?>(null) }
+    var dropdownExpanded by remember { mutableStateOf(false) }
+    val filteredCampaigns = remember(searchQuery, allCampaigns) {
+        if (searchQuery.isBlank()) allCampaigns else allCampaigns.filter { it.name.contains(searchQuery, ignoreCase = true) }
+    }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f)), contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            colors = SurfaceDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+            modifier = Modifier
+                .wrapContentSize()
+                .widthIn(max = 500.dp)
+                .padding(24.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(text = "Export Campaign Report", style = MaterialTheme.typography.headlineMedium)
+                TextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it; selectedCampaignId = null },
+                    label = { Text("Search Campaigns...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = {
+                        IconButton(onClick = { dropdownExpanded = true }) {
+                            Icon(
+                                Icons.Default.ArrowDropDown,
+                                null
+                            )
+                        }
+                    })
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        Button(
+                            onClick = { dropdownExpanded = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Select from List") }
+                        DropdownMenu(
+                            expanded = dropdownExpanded,
+                            onDismissRequest = { dropdownExpanded = false },
+                            modifier = Modifier
+                                .width(300.dp)
+                                .background(Color(0xFF1E2136))
+                        ) {
+                            filteredCampaigns.forEach { campaign ->
+                                DropdownMenuItem(
+                                    text = { Text(campaign.name, color = Color.White) },
+                                    onClick = {
+                                        selectedCampaignId = campaign.id; searchQuery = campaign.name; dropdownExpanded = false
+                                    })
+                            }
+                        }
+                    }
+                    Button(
+                        onClick = { selectedCampaignId = null; searchQuery = "All Campaigns" },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Select All") }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(
+                        onClick = {
+                            viewModel.exportCampaignData(
+                                "csv",
+                                selectedCampaignId,
+                                if (searchQuery == "All Campaigns") null else searchQuery
+                            ); onDismiss()
+                        },
+                        modifier = Modifier
+                            .focusRequester(focusRequester)
+                            .clickable {
+                                viewModel.exportCampaignData(
+                                    "csv",
+                                    selectedCampaignId,
+                                    if (searchQuery == "All Campaigns") null else searchQuery
+                                ); onDismiss()
+                            }
+                    ) { Text("CSV") }
+                    Button(
+                        onClick = {
+                            viewModel.exportCampaignData(
+                                "pdf",
+                                selectedCampaignId,
+                                if (searchQuery == "All Campaigns") null else searchQuery
+                            ); onDismiss()
+                        },
+                        modifier = Modifier.clickable {
+                            viewModel.exportCampaignData(
+                                "pdf",
+                                selectedCampaignId,
+                                if (searchQuery == "All Campaigns") null else searchQuery
+                            ); onDismiss()
+                        }
+                    ) { Text("PDF") }
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier.clickable { onDismiss() }
+                    ) { Text("Cancel") }
+                }
+            }
         }
     }
 }

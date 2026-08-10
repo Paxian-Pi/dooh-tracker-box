@@ -1,6 +1,5 @@
 package com.doohtracker.box.data.hardware
 
-import com.doohtracker.box.data.hardware.SignalMonitor
 import com.doohtracker.box.data.repository.CampaignRepository
 import android.util.Log
 import kotlinx.coroutines.*
@@ -41,20 +40,18 @@ class HeartbeatServer @Inject constructor(
                     }
 
                     val message = String(packet.data, 0, packet.length)
-                    Log.d("HeartbeatServer", "Received heartbeat from ${packet.address.hostAddress}: $message")
-                    
                     val parts = message.split(":")
-                    val metadata = if (parts.size >= 6 && parts[0] == "PULSE") {
-                        // Protocol: PULSE:STATUS:HOSTNAME:PORTS:TIMESTAMP:TRANSMITTING[:MEDIA_TITLE]
-                        val mediaTitle = if (parts.size >= 7) {
-                            // Reconstruct title in case it contained colons
-                            message.substringAfter(":").substringAfter(":").substringAfter(":")
-                                .substringAfter(":").substringAfter(":").substringAfter(":")
-                        } else {
-                            "NONE"
-                        }
+                    
+                    if (parts.size >= 8 && parts[0] == "PULSE") {
+                        // Protocol: PULSE:STATUS:HOSTNAME:PORTS:TIMESTAMP:TRANSMITTING:MEDIA_TITLE:SITE_ID
+                        // Site ID is ALWAYS the last part.
+                        val siteId = parts.last()
+                        
+                        // Media title is everything between index 6 and the last part
+                        val mediaTitle = parts.subList(6, parts.size - 1).joinToString(":")
 
-                        SourceMetadata(
+                        val metadata = SourceMetadata(
+                            siteId = siteId,
                             ipAddress = packet.address.hostAddress ?: "Unknown",
                             status = parts[1],
                             hostname = parts[2],
@@ -63,20 +60,9 @@ class HeartbeatServer @Inject constructor(
                             mediaTitle = mediaTitle,
                             lastSeen = parts[4].toLongOrNull() ?: System.currentTimeMillis()
                         )
-                    } else {
-                        SourceMetadata(
-                            ipAddress = packet.address.hostAddress ?: "Unknown",
-                            status = "ACTIVE",
-                            hostname = "Generic Source",
-                            activePorts = "None",
-                            isTransmitting = false,
-                            mediaTitle = "NONE",
-                            lastSeen = System.currentTimeMillis()
-                        )
+                        Log.d("HeartbeatServer", "Routing heartbeat for Site ID: $siteId")
+                        signalMonitor.reportHeartbeat(siteId, metadata)
                     }
-
-                    // Report to the monitor that we have an active network signal with info
-                    signalMonitor.reportHeartbeat(metadata)
                 }
             } catch (e: Exception) {
                 Log.e("HeartbeatServer", "Server error", e)
@@ -85,23 +71,27 @@ class HeartbeatServer @Inject constructor(
             }
         }
 
-        // Discovery Broadcast: Let the Windows/Linux/Mac app find us
+        // Discovery Broadcast: Advertise ALL active Site IDs and their current owners
         scope.launch {
             while (isActive) {
                 try {
-                    val siteId = campaignRepository.getActivationCode().ifBlank { "UNACTIVATED" }
-                    val currentOwner = if (signalMonitor.isSourceActive.first()) {
-                        signalMonitor.sourceMetadata.first()?.hostname ?: "NONE"
-                    } else "NONE"
+                    val siteIds = campaignRepository.getActivationCodes()
+                    val allMetadata = signalMonitor.allSourceMetadata.first()
                     
-                    val discoveryMsg = "DOOH_TRACKER_ADVERT:${port}:${siteId}:${currentOwner}".toByteArray()
+                    val siteStatusList = siteIds.map { sid ->
+                        val owner = allMetadata[sid]?.hostname ?: "NONE"
+                        "$sid|$owner"
+                    }
+                    
+                    val siteStatusCsv = if (siteStatusList.isEmpty()) "UNACTIVATED|NONE" else siteStatusList.joinToString(",")
+                    
+                    val discoveryMsg = "DOOH_TRACKER_ADVERT:${port}:${siteStatusCsv}".toByteArray()
                     val broadcastAddr = InetAddress.getByName("255.255.255.255")
                     val discoveryPacket = DatagramPacket(discoveryMsg, discoveryMsg.size, broadcastAddr, 50006)
                     socket?.send(discoveryPacket)
                 } catch (e: Exception) {
-                    // Ignore broadcast errors
                 }
-                delay(2000.milliseconds) // Broadcast every 2 seconds (Increased frequency for stability)
+                delay(2000.milliseconds)
             }
         }
     }

@@ -5,6 +5,7 @@ import com.doohtracker.box.data.local.CampaignEntity
 import com.doohtracker.box.data.local.TrackingLogDao
 import com.doohtracker.box.data.local.TrackingLogEntity
 import com.doohtracker.box.data.manager.DeviceManager
+import com.doohtracker.box.data.manager.Identity
 import com.doohtracker.box.data.model.SendProofOfPlayRequest
 import com.doohtracker.box.data.model.TrackHourlyRequest
 import com.doohtracker.box.data.model.toEntity
@@ -15,10 +16,9 @@ import com.doohtracker.box.data.util.baseUrl
 import com.doohtracker.box.data.hardware.SignalMonitor
 import com.doohtracker.box.data.hardware.SourceMetadata
 import com.doohtracker.box.data.hardware.UsbConnectionMonitor
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import android.util.Log
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -30,26 +30,40 @@ class CampaignRepository @Inject constructor(
     private val api: CampaignApi,
     private val campaignDao: CampaignDao,
     private val trackingLogDao: TrackingLogDao,
-    private val deviceManager: DeviceManager,
+    val deviceManager: DeviceManager,
     private val signalMonitor: SignalMonitor,
     private val mediaDownloader: MediaDownloader,
     private val timeProvider: TimeProvider
 ) {
     val allCampaigns: Flow<List<CampaignEntity>> = campaignDao.getAllCampaigns()
     val recentLogs: Flow<List<TrackingLogEntity>> = trackingLogDao.getRecentLogs()
+    val identities: Flow<List<Identity>> = deviceManager.identitiesFlow
 
-    // Session Tracking variables
-    private var activeSessionCampaignId: String? = null
-    private var activeSessionStartTime: Long = 0L
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val isHubSyncing: Flow<Boolean> = combine(_isSyncing, allCampaigns) { syncing, campaigns ->
+        syncing || (campaigns.isNotEmpty() && campaigns.any { it.mediaUrl != null && it.localPath == null })
+    }.distinctUntilChanged()
+
+    // Hub Tracking: Keyed by Site ID
+    private val activeSessions = mutableMapOf<String, PlaybackSession>()
     private var lastPulseTime: Long = 0L
+    private var lastSyncAttemptedTitle: String? = null
+
+    private data class PlaybackSession(
+        var campaignId: String?,
+        var startTime: Long
+    )
 
     fun isDeviceActivated(): Boolean = deviceManager.isActivated()
-    fun getActivationCode(): String = deviceManager.getActivationCode()
+    fun getActivationCodes(): List<String> = deviceManager.getIdentities().map { it.siteId }
     fun getInstallationNotes(): String = deviceManager.getInstallationNotes()
     fun getLastSyncTime(): Long = deviceManager.getLastSyncTime()
-    
-    fun isHdmiStreamEnabled(): Boolean = deviceManager.isHdmiStreamEnabled()
-    fun setHdmiStreamEnabled(enabled: Boolean) = deviceManager.setHdmiStreamEnabled(enabled)
+
+    fun isSourcePreviewEnabled(): Boolean = deviceManager.isSourcePreviewEnabled()
+    fun setSourcePreviewEnabled(enabled: Boolean) = deviceManager.setSourcePreviewEnabled(enabled)
 
     suspend fun activateDevice(code: String, user: String, notes: String): Result<Unit> {
         return try {
@@ -59,19 +73,15 @@ class CampaignRepository @Inject constructor(
             }
 
             val results = mediaResponse.body()?.results ?: emptyList()
-            
-            // Filter results where campaignTag matches activationCode AND user matches username
             val matchedCampaigns = results.filter { it.campaignTag == code && it.user == user }
 
             if (matchedCampaigns.isNotEmpty()) {
-                deviceManager.saveActivationInfo(user, code, notes)
+                deviceManager.addIdentity(com.doohtracker.box.data.manager.Identity(user, code, notes))
                 deviceManager.updateLastSyncTime(timeProvider.getCurrentTimeMillis())
                 
-                // Immediately insert matched campaign metadata
                 val entities = matchedCampaigns.map { it.toEntity().normalizeUrl() }
                 campaignDao.insertCampaigns(entities)
 
-                // Trigger background media download without blocking the UI
                 CoroutineScope(Dispatchers.IO).launch {
                     syncCampaigns()
                 }
@@ -95,44 +105,50 @@ class CampaignRepository @Inject constructor(
         trackingLogDao.getLogsSinceFlow(since)
 
     suspend fun syncCampaigns() {
+        if (_isSyncing.value) return
+        _isSyncing.value = true
         try {
             val mediaResponse = api.getMedia()
             if (mediaResponse.isSuccessful) {
                 deviceManager.updateLastSyncTime(timeProvider.getCurrentTimeMillis())
                 val mediaResults = mediaResponse.body()?.results ?: emptyList()
-                
-                // Filter by stored credentials
-                val code = deviceManager.getActivationCode()
-                val user = deviceManager.getUsername()
-                val matchedResults = mediaResults.filter { it.campaignTag == code && it.user == user }
+                val identities = deviceManager.getIdentities()
 
-                if (matchedResults.isNotEmpty()) {
-                    val existingCampaigns = campaignDao.getAllCampaigns().first()
-                    val entities = matchedResults.map { dto ->
-                        val entity = dto.toEntity().normalizeUrl()
+                identities.forEach { identity ->
+                    val matchedResults = mediaResults.filter { it.campaignTag == identity.siteId && it.user == identity.username }
+                    if (matchedResults.isNotEmpty()) {
+                        val existingCampaigns = campaignDao.getAllCampaigns().first()
                         
-                        val sourceFilename = entity.mediaUrl?.substringAfterLast("/")?.substringBefore("?")
-                        
-                        // Download media if not already present
-                        val localFile = entity.mediaUrl?.let { url ->
-                            mediaDownloader.downloadMedia(url, entity.id)
+                        // 1. Prepare and insert placeholders immediately so UI shows "Downloading"
+                        val identityEntities = matchedResults.map { dto ->
+                            val entity = dto.toEntity().normalizeUrl()
+                            val existing = existingCampaigns.find { it.id == entity.id }
+                            if (existing != null) {
+                                entity.copy(
+                                    syncedCount = existing.syncedCount,
+                                    sourceFilename = existing.sourceFilename,
+                                    localPath = existing.localPath,
+                                    lastSeenOnBillboardAt = existing.lastSeenOnBillboardAt
+                                )
+                            } else {
+                                entity.copy(
+                                    sourceFilename = entity.mediaUrl?.substringAfterLast("/")?.substringBefore("?")
+                                )
+                            }
                         }
-                        
-                        val existing = existingCampaigns.find { it.id == entity.id }
-                        if (existing != null) {
-                            entity.copy(
-                                syncedCount = existing.syncedCount,
-                                sourceFilename = sourceFilename ?: existing.sourceFilename,
-                                localPath = localFile?.absolutePath ?: existing.localPath
-                            )
-                        } else {
-                            entity.copy(
-                                sourceFilename = sourceFilename,
-                                localPath = localFile?.absolutePath
-                            )
+                        campaignDao.insertCampaigns(identityEntities)
+
+                        // 2. Download files one-by-one and update DB in real-time
+                        identityEntities.forEach { entity ->
+                            if (entity.mediaUrl != null && entity.localPath == null) {
+                                val file = mediaDownloader.downloadMedia(entity.mediaUrl, entity.id)
+                                if (file != null) {
+                                    // Update this specific campaign as "Done" immediately
+                                    campaignDao.insertCampaigns(listOf(entity.copy(localPath = file.absolutePath)))
+                                }
+                            }
                         }
                     }
-                    campaignDao.insertCampaigns(entities)
                 }
             }
             val startOfToday = Calendar.getInstance().apply {
@@ -146,6 +162,8 @@ class CampaignRepository @Inject constructor(
             campaignDao.deleteExpiredCampaigns(startOfToday)
         } catch (e: Exception) {
             Log.e("Sync", "Error during synchronization", e)
+        } finally {
+            _isSyncing.value = false
         }
     }
 
@@ -167,44 +185,58 @@ class CampaignRepository @Inject constructor(
         val reportedTitle = metadata.mediaTitle.lowercase()
         val allCampaignsNow = campaignDao.getAllCampaigns().first()
 
-        // 1. Find the campaign matching current physical output
+        // 1. GLOBAL MATCH: Find which activated client this media belongs to
         val matchedCampaign = allCampaignsNow.find { campaign ->
             val fileName = campaign.sourceFilename?.lowercase() ?: ""
             val campaignName = campaign.name.lowercase()
             (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || reportedTitle.contains(campaignName)
         }?.takeIf { reportedTitle != "none" }
 
+        val siteId = matchedCampaign?.campaignTag ?: "GLOBAL"
         val newCampaignId = matchedCampaign?.id
+        val currentSession = activeSessions[siteId]
+
+        // 1b. RECOGNITION TRIGGER: If unrecognized title detected, attempt immediate sync to fetch new reference
+        if (matchedCampaign == null && reportedTitle != "none" && reportedTitle != lastSyncAttemptedTitle) {
+            lastSyncAttemptedTitle = reportedTitle
+            Log.d("Tracking", "Unrecognized title detected: $reportedTitle. Attempting immediate reference sync.")
+            CoroutineScope(Dispatchers.IO).launch {
+                syncCampaigns()
+            }
+        } else if (matchedCampaign != null) {
+            // Reset attempt tracker if we found a match
+            lastSyncAttemptedTitle = null
+        }
 
         // 2. Logic: Handle Session Changes OR Hourly Boundary Crossings
         val currentHour = SimpleDateFormat("HH", Locale.getDefault()).format(Date(currentTime))
-        val sessionStartHour = if (activeSessionStartTime > 0) {
-            SimpleDateFormat("HH", Locale.getDefault()).format(Date(activeSessionStartTime))
+        val sessionStartHour = if (currentSession?.startTime ?: 0L > 0L) {
+            SimpleDateFormat("HH", Locale.getDefault()).format(Date(currentSession!!.startTime))
         } else currentHour
 
-        val hasContentChanged = newCampaignId != activeSessionCampaignId
+        val hasContentChanged = newCampaignId != currentSession?.campaignId
         val hasHourChanged = currentHour != sessionStartHour
 
         if (hasContentChanged || hasHourChanged) {
-            // A. Finalize previous session
-            if (activeSessionCampaignId != null) {
-                val finishedCampaign = allCampaignsNow.find { it.id == activeSessionCampaignId }
+            // A. Finalize previous session for this client
+            if (currentSession?.campaignId != null) {
+                val finishedCampaign = allCampaignsNow.find { it.id == currentSession.campaignId }
                 if (finishedCampaign != null) {
-                    val durationSeconds = (currentTime - activeSessionStartTime) / 1000L
-                    if (durationSeconds >= 2) { 
-                        Log.d("Tracking", "Finalizing session (Hour change or Content change) for ${finishedCampaign.name}")
+                    val durationSeconds = (currentTime - currentSession.startTime) / 1000L
+                    if (durationSeconds >= 2L) { 
+                        Log.d("Tracking", "Finalizing hub session for ${finishedCampaign.name}")
                         sendTrackingPulse(finishedCampaign, currentTime, locationString, durationSeconds, true)
                     }
                 }
             }
 
-            // B. Start new session (or restart for same ad in new hour)
-            activeSessionCampaignId = newCampaignId
-            activeSessionStartTime = currentTime
-            
+            // B. Start new session for this client
             if (newCampaignId != null) {
-                Log.d("Tracking", "Started session for ${matchedCampaign?.name}")
+                activeSessions[siteId] = PlaybackSession(newCampaignId, currentTime)
+                Log.d("Tracking", "Started hub session for ${matchedCampaign?.name} on site $siteId")
                 campaignDao.updateLastSeenOnBillboardAt(newCampaignId, currentTime)
+            } else {
+                activeSessions.remove(siteId)
             }
         } else if (newCampaignId != null) {
             // C. Maintain current session
@@ -216,16 +248,21 @@ class CampaignRepository @Inject constructor(
 
     suspend fun trackCurrentCampaigns(currentTime: Long, locationString: String) {
         val activeCampaigns = campaignDao.getActiveCampaigns(currentTime).first()
-        val metadata = signalMonitor.sourceMetadata.first()
-        val reportedTitle = metadata?.mediaTitle?.lowercase() ?: ""
+        val allMetadataMap = signalMonitor.allSourceMetadata.first()
+        
+        // Use the first active metadata as the primary source of truth for the screen
+        val primaryMetadata = allMetadataMap.values.firstOrNull()
+        val reportedTitle = primaryMetadata?.mediaTitle?.lowercase() ?: "none"
 
         val rotationGracePeriod = 10 * 60 * 1000L 
         val suspensionThreshold = 20 * 60 * 1000L
 
-        // Handle Heartbeat Timeout (Billboard player closed suddenly)
-        if (currentTime - lastPulseTime > 10000 && activeSessionCampaignId != null) {
-            Log.d("Tracking", "Billboard signal lost. Closing active session.")
-            processBillboardPulse(currentTime, SourceMetadata(mediaTitle = "none"), locationString)
+        // Handle Heartbeat Timeout
+        if (currentTime - lastPulseTime > 15000 && activeSessions.isNotEmpty()) {
+            Log.d("Tracking", "Billboard signal lost for all hub sessions.")
+            activeSessions.keys.toList().forEach { sid ->
+                processBillboardPulse(currentTime, SourceMetadata(siteId = sid, mediaTitle = "none"), locationString)
+            }
         }
 
         activeCampaigns.forEach { campaign ->
@@ -234,14 +271,10 @@ class CampaignRepository @Inject constructor(
             val isCurrentMatch = (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
                                  reportedTitle.contains(campaignName)
 
-            // Update last seen to keep it from being suspended,
-            // but we DO NOT send a tracking pulse here. 
-            // Pulses are sent only when the session ends in processBillboardPulse().
             if (isCurrentMatch && reportedTitle != "none") {
                 campaignDao.updateLastSeenOnBillboardAt(campaign.id, currentTime)
             }
 
-            // Only generate ❌ logs here for ads that are NOT currently playing
             if (!isCurrentMatch || reportedTitle == "none") {
                 val timeSinceSeen = currentTime - campaign.lastSeenOnBillboardAt
                 val isMissingFromRotation = campaign.lastSeenOnBillboardAt != 0L && timeSinceSeen > rotationGracePeriod
@@ -271,8 +304,8 @@ class CampaignRepository @Inject constructor(
         bypassContentCheck: Boolean = false
     ) {
         if (!bypassContentCheck) {
-            // Safety valve for manual calls: Ensure content actually matches billboard
-            val metadata = signalMonitor.sourceMetadata.first()
+            val allMetadata = signalMonitor.allSourceMetadata.first()
+            val metadata = allMetadata.values.firstOrNull() // Check global state
             val reportedTitle = metadata?.mediaTitle?.lowercase() ?: ""
             val fileName = campaign.sourceFilename?.lowercase() ?: ""
             val isMatch = (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
@@ -394,5 +427,12 @@ class CampaignRepository @Inject constructor(
         campaignDao.clearAll()
         trackingLogDao.clearAll()
         mediaDownloader.clearMedia()
+    }
+
+    suspend fun removeIdentity(siteId: String) {
+        deviceManager.removeIdentity(siteId)
+        // Immediately delete campaigns for this site from DB to stop tracking
+        campaignDao.deleteCampaignsByTag(siteId)
+        activeSessions.remove(siteId)
     }
 }

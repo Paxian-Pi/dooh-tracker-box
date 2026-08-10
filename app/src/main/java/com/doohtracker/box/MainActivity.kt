@@ -87,10 +87,11 @@ class MainActivity : ComponentActivity() {
             DoohTrackerBoxTheme {
                 // Handle orientation based on activation state
                 LaunchedEffect(isActivated) {
-                    requestedOrientation = if (isActivated) {
-                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                    } else {
-                        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    if (isActivated) {
+                        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    } else if (campaignRepository.getActivationCodes().isEmpty()) {
+                        // Only force portrait if we have NO sites at all
+                        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                     }
                 }
 
@@ -106,6 +107,11 @@ class MainActivity : ComponentActivity() {
                                 val freshIntent = Intent(this@MainActivity, MainActivity::class.java)
                                 finish()
                                 startActivity(freshIntent)
+                            }
+                        }
+                        LaunchedEffect(viewModel) {
+                            viewModel.onAddIdentity.collect {
+                                isActivated = false
                             }
                         }
                         DashboardScreen(viewModel)

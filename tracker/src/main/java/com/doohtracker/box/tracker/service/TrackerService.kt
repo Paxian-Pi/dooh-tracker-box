@@ -52,13 +52,13 @@ class TrackerService : Service() {
     private fun observeTrackingLogic() {
         serviceScope.launch {
             // High-frequency Pulse Listener (Every 2 seconds via network)
-            gatekeeper.signalMonitor.sourceMetadata.collect { metadata ->
-                if (metadata != null) {
-                    val location = locationMonitor.currentLocation.first()
-                    val locationString = if (location != null) {
-                        "${location.latitude}, ${location.longitude}"
-                    } else ""
+            gatekeeper.signalMonitor.allSourceMetadata.collect { allMetadata ->
+                val location = locationMonitor.currentLocation.first()
+                val locationString = if (location != null) {
+                    "${location.latitude}, ${location.longitude}"
+                } else ""
 
+                allMetadata.values.forEach { metadata ->
                     campaignRepository.processBillboardPulse(
                         currentTime = timeProvider.getCurrentTimeMillis(),
                         metadata = metadata,

@@ -20,6 +20,9 @@ interface CampaignDao {
     @Query("DELETE FROM campaigns WHERE endTime < :currentTime")
     suspend fun deleteExpiredCampaigns(currentTime: Long)
 
+    @Query("DELETE FROM campaigns WHERE campaignTag = :tag")
+    suspend fun deleteCampaignsByTag(tag: String)
+
     @Query("DELETE FROM campaigns")
     suspend fun clearAll()
 

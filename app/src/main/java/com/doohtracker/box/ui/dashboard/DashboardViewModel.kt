@@ -3,6 +3,7 @@ package com.doohtracker.box.ui.dashboard
 import android.content.Context
 import android.location.Geocoder
 import android.widget.Toast
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
@@ -59,10 +60,14 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     private val _onLogoutSuccess = MutableSharedFlow<Unit>()
     val onLogoutSuccess = _onLogoutSuccess.asSharedFlow()
 
+    private val _onAddIdentity = MutableSharedFlow<Unit>()
+    val onAddIdentity = _onAddIdentity.asSharedFlow()
+
     private val timeTicker = flow {
+        emit(timeProvider.getCurrentTimeMillis()) // Emit immediately on start
         while (true) {
-            emit(timeProvider.getCurrentTimeMillis())
             delay(10000.milliseconds)
+            emit(timeProvider.getCurrentTimeMillis())
         }
     }
 
@@ -74,40 +79,107 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val isSourceLinked: StateFlow<Boolean> = signalMonitor.isSourceActive
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val sourceMonitorStatus: StateFlow<String> = combine(
         isSourceLinked,
         anyCampaignActive,
         campaignRepository.allCampaigns,
-        signalMonitor.sourceMetadata
-    ) { linked, anyActive, all, metadata ->
+        signalMonitor.allSourceMetadata
+    ) { linked, anyActive, all, allMetadata ->
+        val metadata = allMetadata.values.firstOrNull() 
         when {
             linked -> {
                 val reportedTitle = metadata?.mediaTitle?.lowercase() ?: ""
-                
-                // User requirement: Active only if playing content is amongst ANY downloaded ones
                 val hasContentMatchInSystem = all.any { campaign ->
                     val fileName = campaign.sourceFilename?.lowercase() ?: ""
                     (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
                     reportedTitle.contains(campaign.name.lowercase())
                 } && reportedTitle != "none"
 
-                if (hasContentMatchInSystem) {
-                    "Active"
-                } else if (reportedTitle == "none" || reportedTitle.isEmpty()) {
-                    "No Media Detected"
-                } else {
-                    "Content Mismatch"
-                }
+                if (hasContentMatchInSystem) "Active"
+                else if (reportedTitle == "none" || reportedTitle.isEmpty()) "No Media"
+                else "Content Mismatch"
             }
             all.isNotEmpty() -> "Ready"
             else -> "Inactive"
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Inactive")
 
-    private val _isHdmiStreamEnabled = MutableStateFlow(campaignRepository.isHdmiStreamEnabled())
-    val isHdmiStreamEnabled: StateFlow<Boolean> = _isHdmiStreamEnabled.asStateFlow()
+    val identities: StateFlow<List<IdentityUiModel>> = combine(
+        campaignRepository.identities,
+        campaignRepository.allCampaigns,
+        signalMonitor.allSourceMetadata,
+        campaignRepository.isSyncing,
+        timeTicker
+    ) { registeredIdentities, allCampaigns, allMetadata, isSyncing, currentTime ->
+        if (registeredIdentities.isEmpty()) {
+            return@combine emptyList<IdentityUiModel>()
+        }
+        
+        registeredIdentities.map { identity ->
+            val siteId = identity.siteId
+            val username = identity.username
+            val identityCampaigns = allCampaigns.filter { it.campaignTag == siteId }
+            val metadata = allMetadata[siteId]
+            
+            // Site-specific downloading logic:
+            // 1. If we have campaigns and any media is missing local files, it's still downloading.
+            // 2. If it's a brand new site (no campaigns yet) and the hub is syncing, it's downloading.
+            val isDownloading = (identityCampaigns.isNotEmpty() && identityCampaigns.any { it.mediaUrl != null && it.localPath == null }) || 
+                               (identityCampaigns.isEmpty() && isSyncing)
+            
+            val reportedTitle = metadata?.mediaTitle?.lowercase() ?: ""
+            val hasContentMatchInSystem = identityCampaigns.any { campaign ->
+                val fileName = campaign.sourceFilename?.lowercase() ?: ""
+                (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
+                reportedTitle.contains(campaign.name.lowercase())
+            } && reportedTitle != "none"
+
+            val isTimedOut = (currentTime - (metadata?.lastSeen ?: 0L)) > 15000
+            
+            val status: String
+            val statusColor: androidx.compose.ui.graphics.Color
+            
+            when {
+                metadata == null || isTimedOut -> {
+                    status = "Ready"
+                    statusColor = com.doohtracker.box.ui.theme.StatusCyan
+                }
+                hasContentMatchInSystem -> {
+                    status = "Active"
+                    statusColor = com.doohtracker.box.ui.theme.StatusGreen
+                }
+                reportedTitle == "none" || reportedTitle.isEmpty() -> {
+                    status = "No Media"
+                    statusColor = Color(0xFF87CEEB)
+                }
+                else -> {
+                    status = "Content Mismatch"
+                    statusColor = com.doohtracker.box.ui.theme.StatusYellow
+                }
+            }
+
+            IdentityUiModel(
+                siteId = siteId,
+                username = username,
+                status = status,
+                statusColor = statusColor,
+                currentCampaign = identityCampaigns.joinToString(" | ") { it.name }
+                    .ifEmpty { "No Ads Downloaded" },
+                downloadedCount = identityCampaigns.size,
+                mediaTitle = metadata?.mediaTitle ?: "NONE",
+                isMismatched = status == "Content Mismatch",
+                isDownloading = isDownloading
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val isHubSyncing: StateFlow<Boolean> = identities.map { list ->
+        list.any { it.isDownloading }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    private val _isSourcePreviewEnabled = MutableStateFlow(campaignRepository.isSourcePreviewEnabled())
+    val isSourcePreviewEnabled: StateFlow<Boolean> = _isSourcePreviewEnabled.asStateFlow()
 
     init {
         usbConnectionMonitor.onNewPermissionGranted
@@ -146,6 +218,18 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
         }
     }
 
+    fun startAddIdentity() {
+        viewModelScope.launch {
+            _onAddIdentity.emit(Unit)
+        }
+    }
+
+    fun removeSite(siteId: String) {
+        viewModelScope.launch {
+            campaignRepository.removeIdentity(siteId)
+        }
+    }
+
     val isConnected: StateFlow<Boolean> = connectivityMonitor.isConnected
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
@@ -157,8 +241,8 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Detecting...")
 
     val activationCode: StateFlow<String> = campaignRepository.allCampaigns
-        .map { campaignRepository.getActivationCode() }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), campaignRepository.getActivationCode())
+        .map { campaignRepository.getActivationCodes().firstOrNull() ?: "UNACTIVATED" }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "UNACTIVATED")
 
     val lastSyncTime: StateFlow<String> = flow {
         while (true) {
@@ -183,35 +267,22 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     val allCampaignsList: StateFlow<List<com.doohtracker.box.data.local.CampaignEntity>> = campaignRepository.allCampaigns
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun toggleHdmiStream(enabled: Boolean) {
-        if (enabled && !isSourceLinked.value) {
-            viewModelScope.launch {
-                Toast.makeText(context, "Source Monitor is not Linked", android.widget.Toast.LENGTH_SHORT).show()
-                _isHdmiStreamEnabled.value = false
-                campaignRepository.setHdmiStreamEnabled(false)
-            }
-        } else {
-            campaignRepository.setHdmiStreamEnabled(enabled)
-            _isHdmiStreamEnabled.value = enabled
-        }
+    fun toggleSourcePreview(enabled: Boolean) {
+        campaignRepository.setSourcePreviewEnabled(enabled)
+        _isSourcePreviewEnabled.value = enabled
     }
 
     val currentCampaignName: StateFlow<String> = combine(
-        gatekeeper.isTrackingAllowed,
         campaignRepository.allCampaigns,
         timeTicker
-    ) { isTrackingAllowed, allCampaigns, currentTime ->
-        if (isTrackingAllowed) {
-            val activeCampaigns = allCampaigns.filter {
-                it.startTime <= currentTime && it.endTime >= currentTime
-            }
-            if (activeCampaigns.isNotEmpty()) {
-                activeCampaigns.joinToString(" | ") { "${it.name} (${it.syncedCount})" }
-            } else {
-                "No Scheduled Campaigns Now"
-            }
+    ) { allCampaigns, currentTime ->
+        val activeCampaigns = allCampaigns.filter {
+            it.startTime <= currentTime && it.endTime >= currentTime
+        }
+        if (activeCampaigns.isNotEmpty()) {
+            activeCampaigns.joinToString(" | ") { "${it.name} (${it.syncedCount})" }
         } else {
-            "Waiting for scheduled campaign(s)"
+            "No Scheduled Campaigns Now"
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Initializing...")
 

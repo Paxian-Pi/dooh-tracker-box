@@ -33,24 +33,26 @@ class VerificationGatekeeper @Inject constructor(
         combine(
             campaignRepository.getActiveCampaigns(currentTime),
             signalMonitor.isSourceActive,
-            signalMonitor.sourceMetadata
-        ) { activeCampaigns, isSourceActive, metadata ->
+            signalMonitor.allSourceMetadata
+        ) { activeCampaigns, isSourceActive, allMetadata ->
             // 1. Must have scheduled campaigns
             if (activeCampaigns.isEmpty()) return@combine false
             
             // 2. Source Monitor must be linked
-            if (!isSourceActive || metadata == null) return@combine false
+            if (!isSourceActive || allMetadata.isEmpty()) return@combine false
 
             // 3. Content Verification Rule (Strict Matching)
-            // Verify that the billboard content exists in our SYSTEM (any downloaded campaign)
-            val reportedTitle = metadata.mediaTitle.lowercase()
-            val hasSystemMatch = campaignRepository.allCampaigns.first().any { campaign ->
-                val fileName = campaign.sourceFilename?.lowercase() ?: ""
-                val campaignName = campaign.name.lowercase()
-                
-                (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
-                reportedTitle.contains(campaignName)
-            } && reportedTitle != "none"
+            // Verify that at least one incoming title matches a system campaign
+            val allReportedTitles = allMetadata.values.map { it.mediaTitle.lowercase() }
+            
+            val hasSystemMatch = allReportedTitles.any { reportedTitle ->
+                reportedTitle != "none" && campaignRepository.allCampaigns.first().any { campaign ->
+                    val fileName = campaign.sourceFilename?.lowercase() ?: ""
+                    val campaignName = campaign.name.lowercase()
+                    (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
+                    reportedTitle.contains(campaignName)
+                }
+            }
 
             // Final Gate: Must be Linked + Trustworthy Content Match
             hasSystemMatch

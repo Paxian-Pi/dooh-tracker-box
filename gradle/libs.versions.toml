@@ -17,6 +17,7 @@ coroutines = "1.9.0"
 ksp = "2.0.21-1.0.27"
 media3 = "1.5.1"
 coil = "2.7.0"
+room3CommonJvm = "3.0.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -71,6 +72,7 @@ coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coi
 junit = { group = "junit", name = "junit", version = "4.13.2" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version = "1.2.1" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version = "3.6.1" }
+androidx-room3-common-jvm = { group = "androidx.room3", name = "room3-common-jvm", version.ref = "room3CommonJvm" }
 
 [plugins]
 agp-app = { id = "com.android.application", version.ref = "agp" }

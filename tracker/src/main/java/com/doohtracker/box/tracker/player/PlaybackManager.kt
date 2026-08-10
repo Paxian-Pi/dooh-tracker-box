@@ -77,17 +77,28 @@ class PlaybackManager @Inject constructor(
 
     private fun startLiveMirrorMonitor() {
         playerScope.launch {
-            // Observe the billboard's current title from the Source Monitor
-            gatekeeper.signalMonitor.sourceMetadata.collectLatest { metadata ->
+            // Observe all billboard pulses AND the hub's aggregate syncing state
+            combine(
+                gatekeeper.signalMonitor.allSourceMetadata,
+                campaignRepository.isHubSyncing
+            ) { allMetadata, isHubSyncing ->
+                if (isHubSyncing) {
+                    Log.d("Playback", "Hub is downloading references. Inhibiting mirror playback.")
+                    stopPlayback()
+                    return@combine
+                }
+
+                // Pickup the most recently active pulse
+                val metadata = allMetadata.values.maxByOrNull { it.lastSeen }
                 val reportedTitle = metadata?.mediaTitle?.lowercase() ?: "none"
                 
                 if (reportedTitle == "none") {
                     _mismatchedTitle.value = null
                     stopPlayback()
-                    return@collectLatest
+                    return@combine
                 }
 
-                // Find a match in our system
+                // Find a match in our system across all clients
                 val allCampaigns = campaignRepository.allCampaigns.first()
                 val matchedCampaign = allCampaigns.find { campaign ->
                     val fileName = campaign.sourceFilename?.lowercase() ?: ""
@@ -97,18 +108,25 @@ class PlaybackManager @Inject constructor(
                 }
 
                 if (matchedCampaign != null) {
+                    // Check if the matched campaign itself has a local file
+                    if (matchedCampaign.localPath == null) {
+                        Log.d("Playback", "Match found for ${matchedCampaign.name} but media not yet downloaded. Waiting...")
+                        stopPlayback()
+                        return@combine
+                    }
+
                     _mismatchedTitle.value = null
                     if (_currentCampaign.value?.id != matchedCampaign.id) {
                         Log.d("Playback", "Billboard Title Changed -> ${matchedCampaign.name}. Mirroring...")
                         playCampaign(matchedCampaign)
                     }
                 } else {
-                    // Mismatched: Billboard is playing something we don't have media for
-                    Log.d("Playback", "Billboard playing unrecognized content: $reportedTitle. Alerting monitor.")
+                    // Mismatched: Billboard is playing something unrecognized by the Hub
+                    Log.d("Playback", "Billboard playing unrecognized content: $reportedTitle.")
                     stopPlayback()
                     _mismatchedTitle.value = metadata?.mediaTitle ?: "Unknown File"
                 }
-            }
+            }.collect()
         }
     }
 

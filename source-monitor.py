@@ -49,6 +49,7 @@ def get_app_data_path():
 DATA_DIR = get_app_data_path()
 CONFIG_FILE = os.path.join(DATA_DIR, "monitor_config.json")
 LOG_FILE = os.path.join(DATA_DIR, "monitor.log")
+IDENTITIES_FILE = os.path.join(DATA_DIR, "active_identities.json")
 
 if USE_CUSTOM_TK:
     ctk.set_appearance_mode("System")
@@ -61,18 +62,26 @@ class SourceMonitorApp:
         self.is_running = False
         self.tracker_ip = None
         self.search_start_time = 0
-        self.is_hibernating = False 
+        self.is_hibernating = False
 
         if self.is_gui:
-            self.root.title("DOOH Source Monitor")
-            self.root.geometry("540x500")
+            title = "DOOH Source Monitor"
+            if initial_id: title += f" - {initial_id}"
+            self.root.title(title)
+            self.root.geometry("540x550")
 
             if USE_CUSTOM_TK:
                 self.target_id_var = ctk.StringVar()
                 self.status_msg_var = ctk.StringVar(value="Status: Stopped")
+                self.host_var = ctk.StringVar(value=f"Source Host: {platform.node()}")
+                self.port_var = ctk.StringVar(value="Active Port: Detecting...")
+                self.stream_var = ctk.StringVar(value="Media Stream: No")
             else:
                 self.target_id_var = tk.StringVar()
                 self.status_msg_var = tk.StringVar(value="Status: Stopped")
+                self.host_var = tk.StringVar(value=f"Source Host: {platform.node()}")
+                self.port_var = tk.StringVar(value="Active Port: Detecting...")
+                self.stream_var = tk.StringVar(value="Media Stream: No")
 
             try:
                 self.root.lift()
@@ -120,7 +129,12 @@ class SourceMonitorApp:
 
             ctk.CTkLabel(self.main_frame, text="(Required to link a specific tracker)", text_color="gray", font=("Helvetica", 12)).pack()
 
-            self.status_label = ctk.CTkLabel(self.main_frame, textvariable=self.status_msg_var, font=("Courier", 14, "italic"))
+            # Telemetry Info (Added more data info)
+            ctk.CTkLabel(self.main_frame, textvariable=self.host_var, font=("Courier", 12)).pack(pady=(10, 0))
+            ctk.CTkLabel(self.main_frame, textvariable=self.port_var, font=("Courier", 12)).pack()
+            ctk.CTkLabel(self.main_frame, textvariable=self.stream_var, font=("Courier", 12)).pack()
+
+            self.status_label = ctk.CTkLabel(self.main_frame, textvariable=self.status_msg_var, font=("Courier", 14, "italic"), text_color="#000000")
             self.status_label.pack(pady=10)
 
             self.btn_toggle = ctk.CTkButton(
@@ -187,6 +201,24 @@ class SourceMonitorApp:
         with open(CONFIG_FILE, "w") as f:
             json.dump({"target_id": current_id}, f)
 
+    def _update_active_identities(self, site_id, active):
+        try:
+            site_id = site_id.strip()
+            if not site_id: return
+            active_ids = []
+            if os.path.exists(IDENTITIES_FILE):
+                with open(IDENTITIES_FILE, "r") as f:
+                    try: active_ids = json.load(f).get("active_ids", [])
+                    except: pass
+            if active:
+                if site_id.lower() not in [sid.lower() for sid in active_ids]:
+                    active_ids.append(site_id)
+            else:
+                active_ids = [sid for sid in active_ids if sid.lower() != site_id.lower()]
+            with open(IDENTITIES_FILE, "w") as f:
+                json.dump({"active_ids": active_ids}, f)
+        except: pass
+
     def toggle_monitoring(self):
         if not self.is_running:
             active_id = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
@@ -197,6 +229,7 @@ class SourceMonitorApp:
                 return
 
             self.save_config()
+            self._update_active_identities(active_id, True)
             self.tracker_ip = None
             self.search_start_time = time.time()
             self.is_running = True
@@ -217,6 +250,8 @@ class SourceMonitorApp:
         else:
             self.is_running = False
             self.is_hibernating = False
+            active_id = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
+            self._update_active_identities(active_id, False)
             if self.is_gui:
                 if USE_CUSTOM_TK:
                     self.btn_toggle.configure(text="Start Monitoring", fg_color="#218838", hover_color="#297339", text_color="white")
@@ -450,16 +485,17 @@ class SourceMonitorApp:
         while self.is_running:
             try:
                 found_ip = self.find_tracker_ip()
-                site_id = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
+                active_id = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
+
                 if found_ip:
                     if self.tracker_ip != found_ip:
-                        self.log(f"🔄 Tracker IP for {site_id} changed or rediscovered: {found_ip}")
+                        self.log(f"🔄 Tracker IP for {active_id} changed or rediscovered: {found_ip}")
                         self.tracker_ip = found_ip
                     self.search_start_time = time.time()
 
                 elapsed = time.time() - self.search_start_time
                 if elapsed > 30:
-                    self.log(f"⚠️ Tracker not found for {site_id}. Resetting...")
+                    self.log(f"⚠️ Tracker not found for {active_id}. Resetting...")
                     self.tracker_ip = None
                     if self.is_gui: self.root.after(0, self._start_hibernation)
                     else: self.is_running = False
@@ -479,10 +515,14 @@ class SourceMonitorApp:
                 media_title = media_title.replace(":", "-").replace("\n", " ").strip()
 
                 if active_ports == "Internal/None": transmitting = "NO"
-                
+
+                if self.is_gui:
+                    self.root.after(0, lambda: self.port_var.set(f"Active Port: {active_ports}"))
+                    self.root.after(0, lambda: self.stream_var.set(f"Media Stream: {transmitting}"))
+
                 source_time = int(time.time() * 1000)
-                # Protocol: PULSE:STATUS:HOSTNAME:PORTS:TIMESTAMP:TRANSMITTING:MEDIA_TITLE
-                message = f"PULSE:{status}:{platform.node()}:{active_ports}:{source_time}:{transmitting}:{media_title}"
+                # Protocol: PULSE:STATUS:HOSTNAME:PORTS:TIMESTAMP:TRANSMITTING:MEDIA_TITLE:SITE_ID
+                message = f"PULSE:{status}:{platform.node()}:{active_ports}:{source_time}:{transmitting}:{media_title}:{active_id}"
 
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                     s.settimeout(2.0)
@@ -503,21 +543,34 @@ class SourceMonitorApp:
 
     def find_tracker_ip(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            # Enable port reuse for multi-instance support
+            if platform.system() == "Windows":
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            else:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+
             s.bind(('', BROADCAST_PORT))
-            s.settimeout(0.5)
+            s.settimeout(1.5) # Increased timeout for multi-instance stability
             try:
-                data, addr = s.recvfrom(1024)
+                data, addr = s.recvfrom(2048) # Increased buffer size
                 parts = data.decode().split(":")
                 if parts[0] == "DOOH_TRACKER_ADVERT":
-                    found_id = parts[2] if len(parts) > 2 else "UNKNOWN"
-                    current_owner = parts[3] if len(parts) > 3 else "NONE"
+                    # Android broadcasts a CSV list of SiteID|Owner pairs
+                    # Example: SiteA|Machine1,SiteB|NONE,SiteC|Machine2
+                    raw_sites = parts[2].split(",")
                     target = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
-                    if target.lower() == found_id.lower():
-                        my_name = platform.node()
-                        if current_owner != "NONE" and current_owner != my_name:
-                            self.update_status(f"Status: Site ID in use by {current_owner}")
-                            return None
-                        return addr[0]
+                    my_node = platform.node()
+                    
+                    for item in raw_sites:
+                        if "|" not in item: continue
+                        sid, owner = item.split("|", 1)
+                        
+                        if sid.lower() == target.lower():
+                            if owner == "NONE" or owner == my_node:
+                                return addr[0]
+                            else:
+                                self.update_status(f"Site ID {sid} is in use by {owner}")
+                                return None
             except: pass
             return None
 
@@ -543,6 +596,25 @@ if __name__ == "__main__":
     parser.add_argument("--id", help="Target Tracker Site ID")
     parser.add_argument("--cli", action="store_true", help="Run in CLI mode")
     args = parser.parse_args()
+
+    # Orchestrator Logic: If launched without ID, spawn all previously active instances
+    if not args.id and not args.cli:
+        identities_path = os.path.join(get_app_data_path(), "active_identities.json")
+        if os.path.exists(identities_path):
+            try:
+                with open(identities_path, "r") as f:
+                    data = json.load(f)
+                    active_ids = data.get("active_ids", [])
+                
+                if active_ids:
+                    print(f"[*] Resuming {len(active_ids)} instances...")
+                    for sid in active_ids:
+                        cflags = subprocess.CREATE_NEW_CONSOLE if platform.system() == "Windows" else 0
+                        subprocess.Popen([sys.executable, __file__, "--id", sid], creationflags=cflags)
+                    sys.exit(0)
+            except Exception as e:
+                print(f"[*] Orchestrator error: {e}")
+
     if not args.cli:
         try:
             root = ctk.CTk() if USE_CUSTOM_TK else tk.Tk()
