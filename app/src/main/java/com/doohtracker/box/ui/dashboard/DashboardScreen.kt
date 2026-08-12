@@ -1,5 +1,8 @@
 package com.doohtracker.box.ui.dashboard
 
+import android.content.Context
+import android.content.res.Configuration.UI_MODE_TYPE_MASK
+import android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
 import android.widget.Toast
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.LinearEasing
@@ -12,7 +15,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -43,6 +48,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
 import androidx.tv.material3.Text
+import androidx.work.Configuration
 import coil.compose.AsyncImage
 import com.doohtracker.box.ui.theme.StatusCyan
 import com.doohtracker.box.ui.theme.StatusGreen
@@ -77,9 +83,11 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
     val isSourcePreviewEnabled by viewModel.isSourcePreviewEnabled.collectAsState()
     val siteId by viewModel.activationCode.collectAsState()
     val isHubSyncing by viewModel.isHubSyncing.collectAsState()
+    val isDarkMode by viewModel.isDarkModeEnabled.collectAsState()
 
     var showExportDialog by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var adsSiteIdToShow by remember { mutableStateOf<String?>(null) }
 
     val restartButtonFocusRequester = remember { FocusRequester() }
     val logoutButtonFocusRequester = remember { FocusRequester() }
@@ -121,6 +129,18 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         )
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Night/Day Mode Toggle
+                            IconButton(
+                                onClick = { viewModel.toggleDarkMode() },
+                                modifier = Modifier.padding(end = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                    contentDescription = "Toggle Theme",
+                                    tint = if (isDarkMode) Color.Yellow else Color.Gray
+                                )
+                            }
+
                             Text(
                                 text = "Source Preview",
                                 style = MaterialTheme.typography.labelMedium,
@@ -151,7 +171,9 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             onClick = { viewModel.startAddIdentity() },
                             colors = TvButtonDefaults.colors(
                                 containerColor = Color.DarkGray,
-                                contentColor = Color.White
+                                contentColor = Color.White,
+                                focusedContainerColor = MaterialTheme.colorScheme.primary,
+                                focusedContentColor = Color.Black
                             ),
                             modifier = Modifier.clickable { viewModel.startAddIdentity() }
                         ) {
@@ -215,14 +237,44 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
 
                     // MULTI-SITE LIST SECTION (New, integrated into the scroll flow)
                     if (identities.isNotEmpty()) {
-                        Text(
-                            text = "Active Multi-Site Identities (${identities.size})",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = Color.Gray,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                        identities.forEach { identity ->
-                            IdentityHubCard(identity, onRemove = { viewModel.removeSite(it) })
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(4.dp) // Reduced internal spacing
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Active Multi-Site Identities (${identities.size})",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = Color.Gray
+                                )
+
+                                TvButton(
+                                    onClick = { viewModel.clearData() },
+                                    colors = TvButtonDefaults.colors(
+                                        containerColor = Color.Transparent,
+                                        contentColor = StatusRed,
+                                        focusedContainerColor = StatusRed.copy(alpha = 0.1f),
+                                        focusedContentColor = StatusRed
+                                    ),
+                                    modifier = Modifier
+                                        .scale(0.8f)
+                                        .clickable { viewModel.clearData() }
+                                ) {
+                                    Text("Clear Hub")
+                                }
+                            }
+
+                            identities.forEach { identity ->
+                                IdentityHubCard(
+                                    identity = identity,
+                                    onRemove = { viewModel.removeSite(it) },
+                                    onInspect = { adsSiteIdToShow = identity.siteId }
+                                )
+                            }
                         }
                     }
 
@@ -300,25 +352,13 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-//                        TvButton(
-//                            onClick = { showLogoutDialog = true },
-//                            colors = TvButtonDefaults.colors(
-//                                containerColor = Color.Black,
-//                                contentColor = Color.White
-//                            ),
-//                            modifier = Modifier
-//                                .scale(0.9f)
-//                                .clickable { showLogoutDialog = true }
-//                                .background(Color.Black, shape = RoundedCornerShape(25.dp))
-//                        ) {
-//                            Text(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), text = "Wipe All Data")
-//                        }
-
                         TvButton(
                             onClick = { showLogoutDialog = true },
                             colors = TvButtonDefaults.colors(
                                 containerColor = Color.DarkGray,
-                                contentColor = Color.White
+                                contentColor = Color.White,
+                                focusedContainerColor = StatusRed,
+                                focusedContentColor = Color.White
                             ),
                             modifier = Modifier.clickable { showLogoutDialog = true }
                         ) {
@@ -348,9 +388,9 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         val campaign = currentMediaCampaign
 
                         val mediaType = when {
-                            isHubSyncing -> "syncing"
+                            isHubSyncing || !isSourcePreviewEnabled -> "reference"
                             mismatchedTitle != null -> "mismatch"
-                            isSourceLinked && isSourcePreviewEnabled -> "mirror"
+                            isSourceLinked -> "mirror"
                             campaign == null -> "none"
                             campaign.mediaType?.lowercase() == "image" ||
                                     campaign.mediaUrl?.lowercase()?.let {
@@ -362,7 +402,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         }
 
                         when (mediaType) {
-                            "syncing" -> {
+                            "reference" -> {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
@@ -484,7 +524,6 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     val text = if (anyCampaignActive) {
                                         when {
-                                            !isSourcePreviewEnabled -> "Source Preview Disabled"
                                             !isSourceLinked -> "Waiting for Source Monitor Link..."
                                             identities.any { it.status == "No Media" } -> "Waiting for valid media transmission..."
                                             else -> "Preparing campaigns..."
@@ -528,7 +567,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
         if (showLogoutDialog) {
             LogoutDialog(
                 onDismiss = { showLogoutDialog = false },
-                onConfirm = { viewModel.logout() },
+                onConfirm = { viewModel.clearData() },
                 focusRequester = logoutButtonFocusRequester
             )
         }
@@ -546,25 +585,39 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                 focusRequester = exportButtonFocusRequester
             )
         }
+        if (adsSiteIdToShow != null) {
+            val identity = identities.find { it.siteId == adsSiteIdToShow }
+            if (identity != null) {
+                AllAdsDialog(
+                    identity = identity,
+                    onDismiss = { adsSiteIdToShow = null }
+                )
+            }
+        }
     }
 }
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun IdentityHubCard(identity: IdentityUiModel, onRemove: (String) -> Unit) {
+fun IdentityHubCard(identity: IdentityUiModel, onRemove: (String) -> Unit, onInspect: () -> Unit) {
     Surface(
-        shape = MaterialTheme.shapes.medium,
-        colors = SurfaceDefaults.colors(containerColor = Color(0xFF1E2136)),
+        onClick = onInspect,
+        shape = ClickableSurfaceDefaults.shape(MaterialTheme.shapes.medium),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Color(0xFF1E2136),
+            focusedContainerColor = Color(0xFF2D324D) // Increased contrast for TV focus
+        ),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
+//            .padding(vertical = 4.dp)
+            .clickable { onInspect() }
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column(modifier = Modifier.weight(0.8f)) {
                 Text(
                     text = identity.siteId,
                     style = MaterialTheme.typography.bodyLarge,
@@ -598,28 +651,64 @@ fun IdentityHubCard(identity: IdentityUiModel, onRemove: (String) -> Unit) {
                 )
             }
 
-            // Site ID Remove Button
-            Surface(
-                onClick = { onRemove(identity.siteId) },
-                shape = ClickableSurfaceDefaults.shape(CircleShape),
-                colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent, contentColor = StatusRed),
-                modifier = Modifier
-                    .size(24.dp)
-                    .clickable { onRemove(identity.siteId) }
-            ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Remove Site ID",
-                        tint = Color.Gray,
-                        modifier = Modifier.scale(0.8f)
-                    )
-                    Text("✕", color = Color.White.copy(alpha = 0.1f), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Inspect All References Button (Shown when "Active" or "Content Mismatch")
+                if ((identity.status == "Active" || identity.status == "Content Mismatch") && LocalContext.current.isMobileDevice()) {
+                    Surface(
+                        onClick = onInspect,
+                        shape = ClickableSurfaceDefaults.shape(CircleShape),
+                        colors = ClickableSurfaceDefaults.colors(
+                            containerColor = Color.Transparent,
+                            contentColor = StatusCyan,
+                            focusedContainerColor = StatusCyan.copy(alpha = 0.2f)
+                        ),
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clickable { onInspect() }
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = "Inspect All References",
+                                tint = StatusCyan,
+                                modifier = Modifier.scale(0.8f)
+                            )
+                        }
+                    }
+                }
+
+                // Site ID Remove Button
+                Surface(
+                    onClick = { onRemove(identity.siteId) },
+                    shape = ClickableSurfaceDefaults.shape(CircleShape),
+                    colors = ClickableSurfaceDefaults.colors(
+                        containerColor = Color.Transparent,
+                        contentColor = StatusRed,
+                        focusedContainerColor = StatusRed.copy(alpha = 0.2f)
+                    ),
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clickable { onRemove(identity.siteId) }
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Remove Site ID",
+                            tint = Color.Gray,
+                            modifier = Modifier.scale(0.8f)
+                        )
+                        Text("✕", color = Color.White.copy(alpha = 0.1f), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
                 }
             }
-            //
         }
     }
+}
+
+fun Context.isMobileDevice(): Boolean {
+    val uiMode = resources.configuration.uiMode and UI_MODE_TYPE_MASK
+
+    return uiMode != UI_MODE_TYPE_TELEVISION
 }
 
 @OptIn(ExperimentalTvMaterial3Api::class)
@@ -1018,6 +1107,85 @@ fun ExportDialog(viewModel: DashboardViewModel, onDismiss: () -> Unit, focusRequ
                         modifier = Modifier.clickable { onDismiss() }
                     ) { Text("Cancel") }
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun AllAdsDialog(identity: IdentityUiModel, onDismiss: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            colors = SurfaceDefaults.colors(containerColor = Color(0xFF1E2136)),
+            modifier = Modifier
+                .wrapContentSize()
+                .widthIn(max = 550.dp)
+                .padding(24.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = "References for ${identity.siteId}",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = StatusCyan,
+                    fontWeight = FontWeight.Bold
+                )
+
+                val ads = remember(identity.allDownloadedAds) {
+                    identity.allDownloadedAds.split("|")
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() && it != "Waiting for source monitor" }
+                }
+
+                if (ads.isEmpty()) {
+                    Text("No campaigns found for this site.", color = Color.Gray, modifier = Modifier.padding(vertical = 10.dp))
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        ads.forEach { ad ->
+                            Row(verticalAlignment = Alignment.Top) {
+                                Text(
+                                    "• ",
+                                    color = StatusCyan,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = ad,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                TvButton(
+                    onClick = onDismiss,
+                    colors = TvButtonDefaults.colors(
+                        containerColor = Color.DarkGray,
+                        contentColor = Color.White,
+                        focusedContainerColor = StatusCyan,
+                        focusedContentColor = Color.Black
+                    ),
+                    modifier = Modifier.clickable { onDismiss() }
+                ) { Text("Close") }
             }
         }
     }

@@ -60,8 +60,16 @@ class HeartbeatServer @Inject constructor(
                             mediaTitle = mediaTitle,
                             lastSeen = parts[4].toLongOrNull() ?: System.currentTimeMillis()
                         )
-                        Log.d("HeartbeatServer", "Routing heartbeat for Site ID: $siteId")
-                        signalMonitor.reportHeartbeat(siteId, metadata)
+                        
+                        // Targeted Security Filter: Only process pulses for Site IDs registered on THIS hardware
+                        val authorizedIds = campaignRepository.getActivationCodes()
+                        if (authorizedIds.any { it.equals(siteId.trim(), ignoreCase = true) }) {
+                            Log.d("HeartbeatServer", "Routing authorized heartbeat for Site ID: $siteId")
+                            signalMonitor.reportHeartbeat(siteId, metadata)
+                        } else {
+                            // This stops Device A from logging activity meant for Site B
+                            Log.w("HeartbeatServer", "Ignoring UNAUTHORIZED pulse for Site ID: $siteId (Not active on this device)")
+                        }
                     }
                 }
             } catch (e: Exception) {

@@ -27,13 +27,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.*
+import com.doohtracker.box.ui.dashboard.DashboardViewModel
 import com.doohtracker.box.ui.theme.StatusCyan
 import com.doohtracker.box.ui.theme.StatusGreen
 import com.doohtracker.box.ui.theme.StatusRed
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun ActivationScreen(viewModel: ActivationViewModel) {
+fun ActivationScreen(viewModel: ActivationViewModel, clearHub: DashboardViewModel) {
     val activationCode by viewModel.activationCode.collectAsState()
     val username by viewModel.username.collectAsState()
     val installationNotes by viewModel.installationNotes.collectAsState()
@@ -69,7 +70,9 @@ fun ActivationScreen(viewModel: ActivationViewModel) {
         contentAlignment = Alignment.Center
     ) {
         Row(
-            modifier = Modifier.fillMaxSize().padding(32.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
             horizontalArrangement = Arrangement.spacedBy(48.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -130,7 +133,9 @@ fun ActivationScreen(viewModel: ActivationViewModel) {
                 }
 
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 20.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp, bottom = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Button(
@@ -141,7 +146,11 @@ fun ActivationScreen(viewModel: ActivationViewModel) {
                             .focusRequester(addBtnFocusRequester)
                             .clickable { if (!isLoading) viewModel.validateAndAddIdentity() }
                     ) {
-                        Text(if (isLoading) "Validating..." else "Add Site ID", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                        Text(
+                            if (isLoading) "Validating..." else "Add Site ID",
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
 
                     Button(
@@ -164,6 +173,21 @@ fun ActivationScreen(viewModel: ActivationViewModel) {
                     style = MaterialTheme.typography.headlineSmall,
                     color = StatusCyan
                 )
+
+                if (stagedIdentities.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Button(
+                        onClick = { clearHub.clearData() },
+                        enabled = stagedIdentities.isNotEmpty() && !isLoading,
+                        colors = ButtonDefaults.colors(containerColor = Color(0xFF3DAB76), contentColor = Color.Black),
+                        modifier = Modifier
+                            .clickable { clearHub.clearData() }
+                    ) {
+                        Text("Clear Hub", textAlign = TextAlign.Center)
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Surface(
@@ -186,7 +210,9 @@ fun ActivationScreen(viewModel: ActivationViewModel) {
                                     colors = SurfaceDefaults.colors(containerColor = Color(0xFF2A2D4A))
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                                        modifier = Modifier
+                                            .padding(12.dp)
+                                            .fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
@@ -262,9 +288,9 @@ fun TvInputField(
                 keyboardOptions = KeyboardOptions(imeAction = imeAction),
                 keyboardActions = KeyboardActions(
                     onNext = { focusManager.moveFocus(FocusDirection.Down) },
-                    onDone = { 
+                    onDone = {
                         keyboardController?.hide()
-                        onDone() 
+                        onDone()
                     }
                 ),
                 decorationBox = { innerTextField ->

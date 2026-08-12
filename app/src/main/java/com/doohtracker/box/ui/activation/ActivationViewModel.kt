@@ -20,8 +20,8 @@ class ActivationViewModel @Inject constructor(
     private val _username = MutableStateFlow("")
     val username: StateFlow<String> = _username.asStateFlow()
 
-    private val _installationNotes = MutableStateFlow("")
-    val installationNotes: StateFlow<String> = _installationNotes.asStateFlow()
+    private val _location = MutableStateFlow("")
+    val installationNotes: StateFlow<String> = _location.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -35,9 +35,7 @@ class ActivationViewModel @Inject constructor(
     private val _stagedIdentities = MutableStateFlow<List<Identity>>(emptyList())
     val stagedIdentities: StateFlow<List<Identity>> = _stagedIdentities.asStateFlow()
 
-    init {
-        refreshStagedIdentities()
-    }
+    init { refreshStagedIdentities() }
 
     fun onActivationCodeChange(code: String) {
         _activationCode.value = code
@@ -48,15 +46,15 @@ class ActivationViewModel @Inject constructor(
     }
 
     fun onInstallationNotesChange(notes: String) {
-        _installationNotes.value = notes
+        _location.value = notes
     }
 
     private fun refreshStagedIdentities() {
         val current = repository.deviceManager.getIdentities()
         _stagedIdentities.value = current
         // If we already have identities, pull the existing location notes for the next entry
-        if (current.isNotEmpty() && _installationNotes.value.isBlank()) {
-            _installationNotes.value = current.first().installationNotes
+        if (current.isNotEmpty() && _location.value.isBlank()) {
+            _location.value = current.first().location
         }
     }
 
@@ -73,7 +71,7 @@ class ActivationViewModel @Inject constructor(
             val result = repository.activateDevice(
                 code = _activationCode.value,
                 user = _username.value,
-                notes = _installationNotes.value.ifBlank { "Unspecified Location" }
+                notes = _location.value.ifBlank { "Unspecified Location" }
             )
 
             _isLoading.value = false
@@ -97,6 +95,10 @@ class ActivationViewModel @Inject constructor(
                 _errorMessage.value = "Please add at least one Site ID"
             }
         }
+    }
+
+    fun clearHub() {
+        viewModelScope.launch { _stagedIdentities.value = emptyList() }
     }
     
     fun clearError() {

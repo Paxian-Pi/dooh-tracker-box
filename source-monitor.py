@@ -56,7 +56,7 @@ if USE_CUSTOM_TK:
     ctk.set_default_color_theme("blue")
 
 class SourceMonitorApp:
-    def __init__(self, root, initial_id=None):
+    def __init__(self, root, initial_id=None, initial_ip=None):
         self.root = root
         self.is_gui = root is not None
         self.is_running = False
@@ -68,16 +68,18 @@ class SourceMonitorApp:
             title = "DOOH Source Monitor"
             if initial_id: title += f" - {initial_id}"
             self.root.title(title)
-            self.root.geometry("540x550")
+            self.root.geometry("540x680")
 
             if USE_CUSTOM_TK:
                 self.target_id_var = ctk.StringVar()
+                self.manual_ip_var = ctk.StringVar()
                 self.status_msg_var = ctk.StringVar(value="Status: Stopped")
                 self.host_var = ctk.StringVar(value=f"Source Host: {platform.node()}")
                 self.port_var = ctk.StringVar(value="Active Port: Detecting...")
                 self.stream_var = ctk.StringVar(value="Media Stream: No")
             else:
                 self.target_id_var = tk.StringVar()
+                self.manual_ip_var = tk.StringVar()
                 self.status_msg_var = tk.StringVar(value="Status: Stopped")
                 self.host_var = tk.StringVar(value=f"Source Host: {platform.node()}")
                 self.port_var = tk.StringVar(value="Active Port: Detecting...")
@@ -90,11 +92,19 @@ class SourceMonitorApp:
                 pass
 
         self.target_id_raw = initial_id or ""
+        self.manual_ip_raw = initial_ip or ""
 
         if self.is_gui:
             self.load_config()
+            # Prioritize CLI arguments over saved config
             if initial_id:
                 self.target_id_var.set(initial_id)
+                # If ID is provided but IP is not, we clear the IP to force discovery for this new ID
+                # If both are provided, we use the new IP.
+                self.manual_ip_var.set(initial_ip if initial_ip else "")
+            elif initial_ip:
+                self.manual_ip_var.set(initial_ip)
+
             self.create_widgets()
 
         self.log("App initialized. Source platform: " + ("macOS" if platform.system() == "Darwin" else platform.system()))
@@ -127,7 +137,20 @@ class SourceMonitorApp:
             )
             self.entry_id.pack(pady=10, padx=30, fill="x")
 
-            ctk.CTkLabel(self.main_frame, text="(Required to link a specific tracker)", text_color="gray", font=("Helvetica", 12)).pack()
+            ctk.CTkLabel(self.main_frame, text="Manual Tracker IP (Optional)", font=("Helvetica", 14, "bold")).pack(pady=(10, 5))
+            self.entry_ip = ctk.CTkEntry(
+                self.main_frame,
+                textvariable=self.manual_ip_var,
+                height=35,
+                placeholder_text="e.g. 192.168.1.100",
+                corner_radius=17.5,
+                justify='center',
+                border_width=1,
+                font=("Courier", 12)
+            )
+            self.entry_ip.pack(pady=5, padx=60, fill="x")
+
+            ctk.CTkLabel(self.main_frame, text="(Leave blank for auto-discovery)", text_color="gray", font=("Helvetica", 11)).pack()
 
             # Telemetry Info (Added more data info)
             ctk.CTkLabel(self.main_frame, textvariable=self.host_var, font=("Courier", 12)).pack(pady=(10, 0))
@@ -158,6 +181,11 @@ class SourceMonitorApp:
             tk.Label(self.root, text="Target Tracker ID (Site ID):", font=('Helvetica', 10, 'bold')).pack(pady=(20, 5))
             self.entry_id = tk.Entry(self.root, textvariable=self.target_id_var, width=30, justify='center')
             self.entry_id.pack(pady=5)
+            
+            tk.Label(self.root, text="Manual Tracker IP (Optional):").pack()
+            self.entry_ip = tk.Entry(self.root, textvariable=self.manual_ip_var, width=30, justify='center')
+            self.entry_ip.pack(pady=5)
+
             tk.Label(self.root, textvariable=self.status_msg_var).pack(pady=10)
             self.btn_toggle = tk.Button(self.root, text="Start Monitoring", command=self.toggle_monitoring)
             self.btn_toggle.pack(pady=10)
@@ -192,14 +220,15 @@ class SourceMonitorApp:
             try:
                 with open(CONFIG_FILE, "r") as f:
                     data = json.load(f)
-                    val = data.get("target_id", "")
-                    self.target_id_var.set(val)
+                    self.target_id_var.set(data.get("target_id", ""))
+                    self.manual_ip_var.set(data.get("manual_ip", ""))
             except: pass
 
     def save_config(self):
         current_id = self.target_id_var.get() if self.is_gui else self.target_id_raw
+        current_ip = self.manual_ip_var.get() if self.is_gui else self.manual_ip_raw
         with open(CONFIG_FILE, "w") as f:
-            json.dump({"target_id": current_id}, f)
+            json.dump({"target_id": current_id, "manual_ip": current_ip}, f)
 
     def _update_active_identities(self, site_id, active):
         try:
@@ -238,9 +267,11 @@ class SourceMonitorApp:
                 if USE_CUSTOM_TK:
                     self.btn_toggle.configure(text="Searching (30s)", fg_color="#FFBF00", hover_color="#E5AB00", text_color="black")
                     self.entry_id.configure(state='disabled')
+                    self.entry_ip.configure(state='disabled')
                 else:
                     self.btn_toggle.config(text="Searching (30s)", bg="#FFBF00")
                     self.entry_id.config(state='disabled')
+                    self.entry_ip.config(state='disabled')
                 self.update_status("Status: Searching for Tracker...")
                 self.root.after(100, self._update_smooth_timer)
 
@@ -256,9 +287,11 @@ class SourceMonitorApp:
                 if USE_CUSTOM_TK:
                     self.btn_toggle.configure(text="Start Monitoring", fg_color="#218838", hover_color="#297339", text_color="white")
                     self.entry_id.configure(state='normal')
+                    self.entry_ip.configure(state='normal')
                 else:
                     self.btn_toggle.config(text="Start Monitoring", bg="green")
                     self.entry_id.config(state='normal')
+                    self.entry_ip.config(state='normal')
                 self.update_status("Status: Stopped")
             self.log("Monitoring stopped.")
 
@@ -484,7 +517,12 @@ class SourceMonitorApp:
     def monitoring_loop(self):
         while self.is_running:
             try:
-                found_ip = self.find_tracker_ip()
+                manual_ip = (self.manual_ip_var.get() if self.is_gui else self.manual_ip_raw).strip()
+                if manual_ip:
+                    found_ip = manual_ip
+                else:
+                    found_ip = self.find_tracker_ip()
+                
                 active_id = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
 
                 if found_ip:
@@ -562,8 +600,11 @@ class SourceMonitorApp:
                     my_node = platform.node()
                     
                     for item in raw_sites:
-                        if "|" not in item: continue
-                        sid, owner = item.split("|", 1)
+                        site_parts = item.split("|")
+                        if len(site_parts) < 2: continue
+                        
+                        sid = site_parts[0]
+                        owner = site_parts[1]
                         
                         if sid.lower() == target.lower():
                             if owner == "NONE" or owner == my_node:
@@ -594,6 +635,7 @@ class SourceMonitorApp:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="DOOH Source Monitor")
     parser.add_argument("--id", help="Target Tracker Site ID")
+    parser.add_argument("--ip", help="Manual Tracker IP address")
     parser.add_argument("--cli", action="store_true", help="Run in CLI mode")
     args = parser.parse_args()
 
@@ -610,6 +652,7 @@ if __name__ == "__main__":
                     print(f"[*] Resuming {len(active_ids)} instances...")
                     for sid in active_ids:
                         cflags = subprocess.CREATE_NEW_CONSOLE if platform.system() == "Windows" else 0
+                        # Note: manual IP is not easily handled here without persisting it per-ID
                         subprocess.Popen([sys.executable, __file__, "--id", sid], creationflags=cflags)
                     sys.exit(0)
             except Exception as e:
@@ -620,11 +663,11 @@ if __name__ == "__main__":
             root = ctk.CTk() if USE_CUSTOM_TK else tk.Tk()
             if platform.system() == "Darwin":
                 subprocess.Popen(['osascript', '-e', f'tell application "System Events" to set frontmost of the first process whose unix id is {os.getpid()} to true'])
-            app = SourceMonitorApp(root, initial_id=args.id)
+            app = SourceMonitorApp(root, initial_id=args.id, initial_ip=args.ip)
             root.mainloop()
         except: args.cli = True
     if args.cli:
-        app = SourceMonitorApp(None, initial_id=args.id)
+        app = SourceMonitorApp(None, initial_id=args.id, initial_ip=args.ip)
         try:
             while True: time.sleep(1)
         except KeyboardInterrupt: sys.exit(0)

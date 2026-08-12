@@ -31,6 +31,10 @@ class DeviceManager @Inject constructor(
     private val KEY_LAST_SYNC_TIME = "last_sync_time"
     private val KEY_SOURCE_PREVIEW_ENABLED = "source_preview_enabled"
     private val KEY_AUTHORIZED_PORT = "authorized_monitoring_port"
+    private val KEY_DARK_MODE_ENABLED = "dark_mode_enabled"
+
+    private val _isDarkModeEnabledFlow = MutableStateFlow(isDarkModeEnabled())
+    val isDarkModeEnabledFlow: StateFlow<Boolean> = _isDarkModeEnabledFlow.asStateFlow()
 
     fun isActivated(): Boolean = getIdentities().isNotEmpty()
     
@@ -44,6 +48,13 @@ class DeviceManager @Inject constructor(
 
     fun setSourcePreviewEnabled(enabled: Boolean) {
         prefs.edit { putBoolean(KEY_SOURCE_PREVIEW_ENABLED, enabled) }
+    }
+
+    fun isDarkModeEnabled(): Boolean = prefs.getBoolean(KEY_DARK_MODE_ENABLED, true)
+
+    fun setDarkModeEnabled(enabled: Boolean) {
+        prefs.edit { putBoolean(KEY_DARK_MODE_ENABLED, enabled) }
+        _isDarkModeEnabledFlow.value = enabled
     }
 
     fun getIdentities(): List<Identity> {
@@ -76,7 +87,7 @@ class DeviceManager @Inject constructor(
         _identitiesFlow.value = identities
     }
 
-    fun getInstallationNotes(): String = getIdentities().firstOrNull()?.installationNotes ?: ""
+    fun getInstallationNotes(): String = getIdentities().firstOrNull()?.location ?: ""
     fun getUsername(): String = getIdentities().firstOrNull()?.username ?: ""
     fun getActivationCode(): String = getIdentities().firstOrNull()?.siteId ?: ""
 

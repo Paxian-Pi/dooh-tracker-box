@@ -10,7 +10,7 @@ import androidx.tv.material3.lightColorScheme
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun DoohTrackerBoxTheme(
-    isInDarkTheme: Boolean = isSystemInDarkTheme(),
+    isInDarkTheme: Boolean,
     content: @Composable () -> Unit,
 ) {
     val colorScheme = if (isInDarkTheme) {

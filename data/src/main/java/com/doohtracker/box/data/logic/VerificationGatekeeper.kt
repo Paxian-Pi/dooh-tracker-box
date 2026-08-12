@@ -27,7 +27,7 @@ class VerificationGatekeeper @Inject constructor(
     val isTrackingAllowed: Flow<Boolean> = flow {
         while (true) {
             emit(timeProvider.getCurrentTimeMillis())
-            delay(10000.milliseconds) 
+            delay(10000.milliseconds)
         }
     }.flatMapLatest { currentTime ->
         combine(
@@ -41,21 +41,22 @@ class VerificationGatekeeper @Inject constructor(
             // 2. Source Monitor must be linked
             if (!isSourceActive || allMetadata.isEmpty()) return@combine false
 
-            // 3. Content Verification Rule (Strict Matching)
-            // Verify that at least one incoming title matches a system campaign
-            val allReportedTitles = allMetadata.values.map { it.mediaTitle.lowercase() }
-            
-            val hasSystemMatch = allReportedTitles.any { reportedTitle ->
-                reportedTitle != "none" && campaignRepository.allCampaigns.first().any { campaign ->
-                    val fileName = campaign.sourceFilename?.lowercase() ?: ""
-                    val campaignName = campaign.name.lowercase()
-                    (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
-                    reportedTitle.contains(campaignName)
+            // 3. Content Verification Rule (Targeted Strictly)
+            // Only allow tracking if we have a match where SiteID in Pulse == SiteID in System
+            val allCampaigns = campaignRepository.allCampaigns.first()
+            val hasTargetedMatch = allMetadata.any { (reportingSiteId, metadata) ->
+                val reportedTitle = metadata.mediaTitle.lowercase()
+                reportedTitle != "none" && allCampaigns.any { campaign ->
+                    // MUST match both Site ID AND Title
+                    campaign.campaignTag.equals(reportingSiteId, ignoreCase = true) && (
+                        (campaign.sourceFilename?.lowercase()?.isNotEmpty() == true && reportedTitle.contains(campaign.sourceFilename.lowercase())) || 
+                        reportedTitle.contains(campaign.name.lowercase())
+                    )
                 }
             }
 
-            // Final Gate: Must be Linked + Trustworthy Content Match
-            hasSystemMatch
+            // Final Gate: Must be Linked + Confirmed Targeted Content Match
+            hasTargetedMatch
         }
     }.distinctUntilChanged()
 }

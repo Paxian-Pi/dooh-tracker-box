@@ -84,14 +84,15 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            DoohTrackerBoxTheme {
+            val isDarkMode by campaignRepository.isDarkModeEnabled.collectAsState(initial = true)
+            DoohTrackerBoxTheme(isInDarkTheme = isDarkMode) {
                 // Handle orientation based on activation state
                 LaunchedEffect(isActivated) {
                     if (isActivated) {
                         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                     } else if (campaignRepository.getActivationCodes().isEmpty()) {
                         // Only force portrait if we have NO sites at all
-                        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+//                        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                     }
                 }
 
@@ -117,12 +118,22 @@ class MainActivity : ComponentActivity() {
                         DashboardScreen(viewModel)
                     } else {
                         val viewModel: ActivationViewModel = hiltViewModel()
-                        LaunchedEffect(viewModel) {
+                        val clearHubViewModel: DashboardViewModel = hiltViewModel()
+
+                        LaunchedEffect(viewModel, clearHubViewModel) {
                             viewModel.onActivationSuccess.collect {
                                 isActivated = true
                             }
                         }
-                        ActivationScreen(viewModel)
+                        LaunchedEffect(clearHubViewModel) {
+                            clearHubViewModel.onLogoutSuccess.collect {
+                                // Restart activity with a fresh intent to clear all ViewModel stores
+                                val freshIntent = Intent(this@MainActivity, MainActivity::class.java)
+                                finish()
+                                startActivity(freshIntent)
+                            }
+                        }
+                        ActivationScreen(viewModel, clearHubViewModel)
                     }
                 }
             }

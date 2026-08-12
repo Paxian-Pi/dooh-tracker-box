@@ -8,6 +8,7 @@ data class IdentityUiModel(
     val status: String,
     val statusColor: Color,
     val currentCampaign: String,
+    val allDownloadedAds: String = "",
     val downloadedCount: Int,
     val mediaTitle: String = "NONE",
     val isMismatched: Boolean = false,
