@@ -14,53 +14,50 @@ The project follows a robust **Multi-Module Clean Architecture** pattern to ensu
 
 ## ✨ Key Features
 
-### 1. Autonomous Tracking Engine
+### 1. Multi-Identity Hub 🏢
+*   **Simultaneous Multi-Tenant Tracking**: Capable of tracking, verifying, and mirroring rotations for multiple clients (Site IDs) on a single physical billboard.
+*   **Instant Visibility**: Registered Site IDs appear on the dashboard instantly on launch, with independent status monitoring for each.
+*   **Auto-Resume Orchestrator**: The Source Monitor automatically spawns independent instances for all previously active sites on system reboot.
+
+### 2. Autonomous Tracking Engine
 *   **Content-Aware Verification**: Automatically detects the filename/title of the media currently playing on the physical billboard via a linked Source Monitor.
-*   **Per-Ad Compliance**: Independently validates each scheduled campaign against the live billboard rotation. If a mismatch is detected, tracking for that specific ad is suspended and flagged in the audit trail.
-*   **Rotation Discovery**: Automatically detects ads removed or re-injected by the media owner. Ads missing from rotation for >20 minutes are temporarily suspended from the tracker.
-*   **Hourly Summaries**: Sends a high-level summary (`trackHourly`) at the start of every hour, including numeric weekday mapping and incremental play counts.
+*   **Targeted Matching**: Strictly matches campaigns based on **Site ID + Title**, ensuring hardware isolation and preventing data cross-talk.
+*   **Rotation Discovery**: Automatically detects ads removed or re-injected. Ads are automatically removed from the active list if not seen for 15 minutes.
+*   **Compliance Verification**: If a mismatch is detected, tracking is suspended and flagged in the audit trail.
 
-### 2. Source Monitor Integration
-*   **Cross-Platform Monitor**: A Python-based client (`source-monitor.py`) runs on the media source machine (Windows/Mac) and broadcasts its state to the Android tracker.
-*   **Truth-at-Source Protocol**: Sends a secure UDP Heartbeat (Pulse) containing machine status, hostname, and the **Actual Media Filename** currently being rendered.
-*   **Ownership Lock**: The tracker binds to a specific Source machine to prevent unauthorized signal hijacking.
+### 3. Source Monitor Integration 🖥️
+*   **Cross-Platform Monitor**: A Python-based client (`source-monitor.py`) with a modern UI (CustomTkinter) for the media source machine.
+*   **Hardware-Locked Affinity**: Uses unique Device IDs to prevent "flipping" between duplicate Site IDs on different devices.
+*   **Manual IP Override**: Supports direct connection to specific tracker IPs for restricted network environments, with strict **Same-Network Validation** to ensure the device is on the same local connection (WiFi/Ethernet).
+*   **Zero-Persistence Resets**: Starting with just an ID flag automatically clears manual overrides, ensuring Auto-Discovery remains the default reliable flow.
 
-### 3. Smart Location & System Health
-*   **Triple-Layer Location**: 
-    1.  **High-Accuracy**: GPS/WiFi scanning.
-    2.  **IP-Fallback**: Geo-location via public IP (for Ethernet-only boxes).
-    3.  **Manual Overwrite**: Automatically uses installation notes if no digital signal is found.
+### 4. Smart Location & System Health
+*   **Triple-Layer Location**: GPS/WiFi, IP-Fallback, and Manual Metadata overwrite.
 *   **System Health Dashboard**: Real-time display of RAM usage, Storage % (Used/Total), and System Uptime.
-
-### 4. Secure Technician Activation
-*   **Hardware Binding**: Devices must be activated with a code and username that matches the backend `MediaResult` assigned to that specific site.
-*   **Installation Metadata**: Technicians provide installation notes (e.g., "Gate 4, Terminal 1") which are used as persistent metadata for all verification logs.
 
 ---
 
 ## 📺 Technician Dashboard
 
-The dashboard is optimized for **Android TV Box** displays (Landscape, D-pad navigation):
+The dashboard is fully optimized for **Android TV Box** (Landscape, D-pad navigation) and **Android Mobile** devices:
 
-*   **Live Preview Mirror**: The preview card on the dashboard acts as a real-time mirror of the physical billboard. It identifies the media currently being rendered by the source machine and displays the corresponding local media file.
-*   **2-Column Grid**: Core metrics (Source Monitor, Internet, IP, Sync) are visible at a single glance.
+*   **High-Contrast TV Focus**: A crisp **1.dp Cyan selection frame** follows the remote across every card, button, and toggle for clear visual feedback.
+*   **Hybrid Interaction**: Seamlessly handles both D-pad remote navigation and high-accuracy mobile touch events.
+*   **Dynamic Mirroring**: Preview window displays "Campaign Reference" status during sync and switches to live Video/Image Mirroring only when all site data is ready.
+*   **Night/Day Mode**: Persistent theme toggle to ensure maximum visibility in both bright day environments and late-night maintenance conditions.
 *   **Truth Status Colors**:
     *   🟢 **Active**: Billboard is playing matched/trusted content.
     *   🟠 **Content Mismatch**: Billboard is playing unrecognized media (Tracking Suspended).
     *   🔵 **No Media Detected**: Source machine is linked but player is closed/idle.
-*   **3-Column Audit Trail**: "Recent Logs" view showing:
-    *   `✓` : Successfully synced pulse.
-    *   `☁` : Local pulse pending upload.
-    *   `❌` : Compliance rejection (Content Mismatch).
 
 ---
 
 ## 🛠 Tech Stack
 
 *   **Language**: Kotlin (Android) / Python (Source Monitor)
-*   **UI**: Jetpack Compose for TV (Material 3)
+*   **UI**: Jetpack Compose for TV (Material 3) / CustomTkinter (Python)
 *   **Database**: Room (with multi-version migration support)
-*   **Networking**: Retrofit 2 + UDP (for local discovery)
+*   **Networking**: Retrofit 2 + UDP (Security-locked discovery)
 *   **Async**: Kotlin Coroutines & Flow
 *   **Background Tasks**: WorkManager (for offline log synchronization)
 
@@ -71,15 +68,15 @@ The dashboard is optimized for **Android TV Box** displays (Landscape, D-pad nav
 ### Prerequisites
 *   Android TV Box or Android Mobile (v8.0+)
 *   Source Monitor Client (Mac or Windows machine connected to the billboard)
-*   Local Network Connection (Tracker and Monitor must be on the same subnet)
+*   Local Network Connection (Tracker and Monitor must be on the same WiFi/Subnet)
 
 ### Installation
 1. Clone the repository.
-2. **Android Tracker**: Build and deploy the `:app` module to the TV Box.
-3. **Activation**: Enter the site/activation code on the Android app to link the systems.
+2. **Android Tracker**: Build and deploy the `:app` module to the device.
+3. **Activation**: Enter the site/activation code on the app to register a client.
 4. **Source Monitor**: Run `source-monitor.py` on the billboard machine:
     `python3 source-monitor.py --id YOUR_SITE_ID`
-5. **Activation**: Enter the site code on the Android app to link the systems.
+    *Optional*: Use `--ip 192.168.x.x` for manual override.
 
 ---
 
@@ -87,8 +84,8 @@ The dashboard is optimized for **Android TV Box** displays (Landscape, D-pad nav
 
 Filter Logcat by the following tags:
 *   `Tracking`: Real-time Proof of Play and Hourly payloads.
-*   `HeartbeatServer`: Local network pulse reception and parsing.
-*   `Sync`: Background campaign download status.
+*   `HeartbeatServer`: Pulse routing and security filtering.
+*   `Sync`: Background campaign download and local path resolution.
 
 ---
-**Verified for production deployment.** ✅
+**Verified for production Multi-Identity deployment.** ✅

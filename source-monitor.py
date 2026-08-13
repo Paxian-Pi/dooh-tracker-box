@@ -7,6 +7,7 @@ import threading
 import json
 import argparse
 import sys
+import ipaddress
 
 # Windows Media SDK Support
 HAS_WINSDK = False
@@ -251,11 +252,21 @@ class SourceMonitorApp:
     def toggle_monitoring(self):
         if not self.is_running:
             active_id = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
+            manual_ip = (self.manual_ip_var.get() if self.is_gui else self.manual_ip_raw).strip()
+
             if not active_id:
                 if self.is_gui:
                     messagebox.showerror("Error", "Target Tracker ID is required.")
                     self.entry_id.focus_set()
                 return
+
+            if manual_ip:
+                if not self._is_valid_local_network_ip(manual_ip):
+                    if self.is_gui:
+                        messagebox.showerror("Network Error", f"The IP {manual_ip} is not on the same local network (WiFi) as this computer.\n\nManual overrides must be on the same connection for security.")
+                    else:
+                        self.log(f"CRITICAL: IP {manual_ip} is rejected (Not on same local network).")
+                    return
 
             self.save_config()
             self._update_active_identities(active_id, True)
@@ -294,6 +305,36 @@ class SourceMonitorApp:
                     self.entry_ip.config(state='normal')
                 self.update_status("Status: Stopped")
             self.log("Monitoring stopped.")
+
+    def _is_valid_local_network_ip(self, ip):
+        """Strict validation to ensure the IP is on the SAME local network as this machine."""
+        try:
+            # 1. Get host's own local IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                # Doesn't need to reach this IP, just used to find preferred interface
+                s.connect(('10.255.255.255', 1))
+                local_ip = s.getsockname()[0]
+            except:
+                local_ip = '127.0.0.1'
+            finally:
+                s.close()
+
+            if local_ip == '127.0.0.1' and ip != '127.0.0.1':
+                return False # No network connection found
+
+            # 2. Compare Subnets (First 3 octets /24)
+            # This is the most common definition of "Same WiFi connection" for field work
+            local_prefix = ".".join(local_ip.split('.')[:3])
+            target_prefix = ".".join(ip.split('.')[:3])
+
+            if local_prefix != target_prefix:
+                self.log(f"Rejected IP {ip}: Not on same subnet as machine ({local_ip})")
+                return False
+
+            return True
+        except:
+            return False
 
     def _update_smooth_timer(self):
         if not self.is_running or self.tracker_ip:

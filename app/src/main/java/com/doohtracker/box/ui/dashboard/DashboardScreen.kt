@@ -16,9 +16,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.*
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +46,7 @@ import androidx.tv.material3.Button as TvButton
 import androidx.tv.material3.ButtonDefaults as TvButtonDefaults
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
+import androidx.tv.material3.Border
 import androidx.tv.material3.Icon
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
@@ -130,15 +134,34 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             // Night/Day Mode Toggle
-                            IconButton(
+                            Surface(
                                 onClick = { viewModel.toggleDarkMode() },
+                                shape = ClickableSurfaceDefaults.shape(CircleShape),
+                                scale = ClickableSurfaceDefaults.scale(focusedScale = 1.1f),
+                                colors = ClickableSurfaceDefaults.colors(
+                                    containerColor = Color.Transparent,
+                                    focusedContainerColor = Color.Gray.copy(alpha = 0.2f)
+                                ),
+                                border = ClickableSurfaceDefaults.border(
+                                    focusedBorder = Border(
+                                        border = BorderStroke(1.dp, StatusCyan),
+                                        shape = CircleShape
+                                    )
+                                ),
                                 modifier = Modifier.padding(end = 8.dp)
                             ) {
-                                Icon(
-                                    imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                    contentDescription = "Toggle Theme",
-                                    tint = if (isDarkMode) Color.Yellow else Color.Gray
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .padding(8.dp)
+                                        .clickable { viewModel.toggleDarkMode() }
+                                ) {
+                                    Icon(
+                                        imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                        contentDescription = "Toggle Theme",
+                                        tint = if (isDarkMode) Color.Yellow else Color.Gray,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
 
                             Text(
@@ -147,11 +170,32 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                 color = if (isSourcePreviewEnabled && isSourceLinked) MaterialTheme.colorScheme.primary else Color.Gray,
                                 modifier = Modifier.padding(end = 8.dp)
                             )
-                            Switch(
-                                checked = isSourcePreviewEnabled && isSourceLinked,
-                                onCheckedChange = { viewModel.toggleSourcePreview(it) },
+                            Surface(
+                                onClick = { viewModel.toggleSourcePreview(!(isSourcePreviewEnabled && isSourceLinked)) },
+                                shape = ClickableSurfaceDefaults.shape(MaterialTheme.shapes.small),
+                                colors = ClickableSurfaceDefaults.colors(
+                                    containerColor = Color.Transparent,
+                                    focusedContainerColor = Color.Gray.copy(alpha = 0.1f)
+                                ),
+                                border = ClickableSurfaceDefaults.border(
+                                    focusedBorder = Border(
+                                        border = BorderStroke(1.dp, StatusCyan),
+                                        shape = MaterialTheme.shapes.small
+                                    )
+                                ),
                                 modifier = Modifier.scale(0.8f)
-                            )
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .clickable { viewModel.toggleSourcePreview(!(isSourcePreviewEnabled && isSourceLinked)) }
+                                ) {
+                                    Switch(
+                                        checked = isSourcePreviewEnabled && isSourceLinked,
+                                        onCheckedChange = { viewModel.toggleSourcePreview(it) },
+                                        modifier = Modifier.padding(4.dp)
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -174,6 +218,12 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                 contentColor = Color.White,
                                 focusedContainerColor = MaterialTheme.colorScheme.primary,
                                 focusedContentColor = Color.Black
+                            ),
+                            border = TvButtonDefaults.border(
+                                focusedBorder = Border(
+                                    border = BorderStroke(1.dp, StatusCyan),
+                                    shape = MaterialTheme.shapes.extraSmall
+                                )
                             ),
                             modifier = Modifier.clickable { viewModel.startAddIdentity() }
                         ) {
@@ -258,11 +308,17 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                         containerColor = Color.Transparent,
                                         contentColor = StatusRed,
                                         focusedContainerColor = StatusRed.copy(alpha = 0.1f),
-                                        focusedContentColor = StatusRed
-                                    ),
-                                    modifier = Modifier
-                                        .scale(0.8f)
-                                        .clickable { viewModel.clearData() }
+                                    focusedContentColor = StatusRed
+                                ),
+                                border = TvButtonDefaults.border(
+                                    focusedBorder = Border(
+                                        border = BorderStroke(1.dp, StatusCyan),
+                                        shape = MaterialTheme.shapes.extraSmall
+                                    )
+                                ),
+                                modifier = Modifier
+                                    .scale(0.8f)
+                                    .clickable { viewModel.clearData() }
                                 ) {
                                     Text("Clear Hub")
                                 }
@@ -359,6 +415,12 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                 contentColor = Color.White,
                                 focusedContainerColor = StatusRed,
                                 focusedContentColor = Color.White
+                            ),
+                            border = TvButtonDefaults.border(
+                                focusedBorder = Border(
+                                    border = BorderStroke(1.dp, StatusCyan),
+                                    shape = MaterialTheme.shapes.extraSmall
+                                )
                             ),
                             modifier = Modifier.clickable { showLogoutDialog = true }
                         ) {
@@ -600,16 +662,25 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun IdentityHubCard(identity: IdentityUiModel, onRemove: (String) -> Unit, onInspect: () -> Unit) {
+    val isDarkMode = MaterialTheme.colorScheme.surface == Color.Black || MaterialTheme.colorScheme.surface.luminance() < 0.5f
+
     Surface(
         onClick = onInspect,
         shape = ClickableSurfaceDefaults.shape(MaterialTheme.shapes.medium),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = Color(0xFF1E2136),
-            focusedContainerColor = Color(0xFF2D324D) // Increased contrast for TV focus
+            containerColor = if (isDarkMode) Color(0xFF1E2136) else Color(0xFFF0F2F5),
+            contentColor = if (isDarkMode) Color.White else Color.Black,
+            focusedContainerColor = if (isDarkMode) Color(0xFF2D324D) else Color(0xFFE2E8F0)
+        ),
+        border = ClickableSurfaceDefaults.border(
+            focusedBorder = Border(
+                border = BorderStroke(1.dp, StatusCyan),
+                shape = MaterialTheme.shapes.medium
+            )
         ),
         modifier = Modifier
             .fillMaxWidth()
-//            .padding(vertical = 4.dp)
+            .padding(vertical = 4.dp)
             .clickable { onInspect() }
     ) {
         Row(
@@ -662,6 +733,12 @@ fun IdentityHubCard(identity: IdentityUiModel, onRemove: (String) -> Unit, onIns
                             contentColor = StatusCyan,
                             focusedContainerColor = StatusCyan.copy(alpha = 0.2f)
                         ),
+                        border = ClickableSurfaceDefaults.border(
+                            focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = CircleShape
+                            )
+                        ),
                         modifier = Modifier
                             .size(24.dp)
                             .clickable { onInspect() }
@@ -685,6 +762,12 @@ fun IdentityHubCard(identity: IdentityUiModel, onRemove: (String) -> Unit, onIns
                         containerColor = Color.Transparent,
                         contentColor = StatusRed,
                         focusedContainerColor = StatusRed.copy(alpha = 0.2f)
+                    ),
+                    border = ClickableSurfaceDefaults.border(
+                        focusedBorder = Border(
+                            border = BorderStroke(1.dp, StatusCyan),
+                            shape = CircleShape
+                        )
                     ),
                     modifier = Modifier
                         .size(24.dp)
@@ -723,23 +806,27 @@ fun StatusCard(
     onClick: (() -> Unit)? = null,
     trailing: @Composable (() -> Unit)? = null
 ) {
-    if (onClick != null) {
-        Surface(
-            onClick = onClick,
-            modifier = modifier.clickable { onClick() },
-            shape = ClickableSurfaceDefaults.shape(MaterialTheme.shapes.medium),
-            colors = ClickableSurfaceDefaults.colors(containerColor = Color(0xFF1E2136), contentColor = Color.White)
-        ) {
-            StatusCardContent(title, info, status, color, isScrolling, trailing)
-        }
-    } else {
-        Surface(
-            modifier = modifier,
-            shape = MaterialTheme.shapes.medium,
-            colors = SurfaceDefaults.colors(containerColor = Color(0xFF1E2136), contentColor = Color.White)
-        ) {
-            StatusCardContent(title, info, status, color, isScrolling, trailing)
-        }
+    val isDarkMode = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+
+    Surface(
+        onClick = onClick ?: {},
+        shape = ClickableSurfaceDefaults.shape(MaterialTheme.shapes.medium),
+        colors = ClickableSurfaceDefaults.colors(
+//            containerColor = if (isDarkMode) Color(0xFF1E2136) else Color(0xFFF0F2F5),
+            containerColor = Color(0xFF1E2136),
+            contentColor = if (isDarkMode) Color.White else Color.Black,
+            focusedContainerColor = if (isDarkMode) Color(0xFF2D324D) else Color(0xFFE2E8F0)
+        ),
+        border = ClickableSurfaceDefaults.border(
+            focusedBorder = Border(
+                border = BorderStroke(1.dp, StatusCyan),
+                shape = MaterialTheme.shapes.medium
+            )
+        ),
+        modifier = modifier
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+    ) {
+        StatusCardContent(title, info, status, color, isScrolling, trailing)
     }
 }
 
@@ -937,12 +1024,24 @@ fun LogoutDialog(onDismiss: () -> Unit, onConfirm: () -> Unit, focusRequester: F
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     TvButton(
                         onClick = onConfirm,
+                        border = TvButtonDefaults.border(
+                            focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            )
+                        ),
                         modifier = Modifier
                             .focusRequester(focusRequester)
                             .clickable { onConfirm() }
                     ) { Text("Logout & Wipe") }
                     TvButton(
                         onClick = onDismiss,
+                        border = TvButtonDefaults.border(
+                            focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            )
+                        ),
                         modifier = Modifier.clickable { onDismiss() }
                     ) { Text("Cancel") }
                 }
@@ -983,12 +1082,24 @@ fun RestartDialog(onDismiss: () -> Unit, onConfirm: () -> Unit, focusRequester: 
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     TvButton(
                         onClick = onConfirm,
+                        border = TvButtonDefaults.border(
+                            focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            )
+                        ),
                         modifier = Modifier
                             .focusRequester(focusRequester)
                             .clickable { onConfirm() }
                     ) { Text("Restart Now") }
                     TvButton(
                         onClick = onDismiss,
+                        border = TvButtonDefaults.border(
+                            focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            )
+                        ),
                         modifier = Modifier.clickable { onDismiss() }
                     ) { Text("Cancel") }
                 }
@@ -1042,8 +1153,14 @@ fun ExportDialog(viewModel: DashboardViewModel, onDismiss: () -> Unit, focusRequ
                     })
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Box(modifier = Modifier.weight(1f)) {
-                        Button(
+                        TvButton(
                             onClick = { dropdownExpanded = true },
+                            border = TvButtonDefaults.border(
+                                focusedBorder = Border(
+                                    border = BorderStroke(1.dp, StatusCyan),
+                                    shape = MaterialTheme.shapes.extraSmall
+                                )
+                            ),
                             modifier = Modifier.fillMaxWidth()
                         ) { Text("Select from List") }
                         DropdownMenu(
@@ -1062,13 +1179,19 @@ fun ExportDialog(viewModel: DashboardViewModel, onDismiss: () -> Unit, focusRequ
                             }
                         }
                     }
-                    Button(
+                    TvButton(
                         onClick = { selectedCampaignId = null; searchQuery = "All Campaigns" },
+                        border = TvButtonDefaults.border(
+                            focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            )
+                        ),
                         modifier = Modifier.weight(1f)
                     ) { Text("Select All") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(
+                    TvButton(
                         onClick = {
                             viewModel.exportCampaignData(
                                 "csv",
@@ -1076,6 +1199,12 @@ fun ExportDialog(viewModel: DashboardViewModel, onDismiss: () -> Unit, focusRequ
                                 if (searchQuery == "All Campaigns") null else searchQuery
                             ); onDismiss()
                         },
+                        border = TvButtonDefaults.border(
+                            focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            )
+                        ),
                         modifier = Modifier
                             .focusRequester(focusRequester)
                             .clickable {
@@ -1086,7 +1215,7 @@ fun ExportDialog(viewModel: DashboardViewModel, onDismiss: () -> Unit, focusRequ
                                 ); onDismiss()
                             }
                     ) { Text("CSV") }
-                    Button(
+                    TvButton(
                         onClick = {
                             viewModel.exportCampaignData(
                                 "pdf",
@@ -1094,6 +1223,12 @@ fun ExportDialog(viewModel: DashboardViewModel, onDismiss: () -> Unit, focusRequ
                                 if (searchQuery == "All Campaigns") null else searchQuery
                             ); onDismiss()
                         },
+                        border = TvButtonDefaults.border(
+                            focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            )
+                        ),
                         modifier = Modifier.clickable {
                             viewModel.exportCampaignData(
                                 "pdf",
@@ -1102,8 +1237,14 @@ fun ExportDialog(viewModel: DashboardViewModel, onDismiss: () -> Unit, focusRequ
                             ); onDismiss()
                         }
                     ) { Text("PDF") }
-                    Button(
+                    TvButton(
                         onClick = onDismiss,
+                        border = TvButtonDefaults.border(
+                            focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            )
+                        ),
                         modifier = Modifier.clickable { onDismiss() }
                     ) { Text("Cancel") }
                 }
@@ -1183,6 +1324,12 @@ fun AllAdsDialog(identity: IdentityUiModel, onDismiss: () -> Unit) {
                         contentColor = Color.White,
                         focusedContainerColor = StatusCyan,
                         focusedContentColor = Color.Black
+                    ),
+                    border = TvButtonDefaults.border(
+                        focusedBorder = Border(
+                            border = BorderStroke(1.dp, StatusCyan),
+                            shape = MaterialTheme.shapes.extraSmall
+                        )
                     ),
                     modifier = Modifier.clickable { onDismiss() }
                 ) { Text("Close") }
