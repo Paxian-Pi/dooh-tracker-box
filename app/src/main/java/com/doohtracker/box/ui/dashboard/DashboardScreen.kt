@@ -16,7 +16,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.List
@@ -146,6 +145,10 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                     focusedBorder = Border(
                                         border = BorderStroke(1.dp, StatusCyan),
                                         shape = CircleShape
+                                    ),
+                                    pressedBorder = Border(
+                                        border = BorderStroke(1.dp, StatusCyan),
+                                        shape = CircleShape
                                     )
                                 ),
                                 modifier = Modifier.padding(end = 8.dp)
@@ -181,18 +184,18 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                     focusedBorder = Border(
                                         border = BorderStroke(1.dp, StatusCyan),
                                         shape = MaterialTheme.shapes.small
+                                    ),
+                                    pressedBorder = Border(
+                                        border = BorderStroke(1.dp, StatusCyan),
+                                        shape = MaterialTheme.shapes.small
                                     )
                                 ),
                                 modifier = Modifier.scale(0.8f)
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .clickable { viewModel.toggleSourcePreview(!(isSourcePreviewEnabled && isSourceLinked)) }
-                                ) {
+                                Box(modifier = Modifier.padding(4.dp)) {
                                     Switch(
                                         checked = isSourcePreviewEnabled && isSourceLinked,
-                                        onCheckedChange = { viewModel.toggleSourcePreview(it) },
-                                        modifier = Modifier.padding(4.dp)
+                                        onCheckedChange = { viewModel.toggleSourcePreview(it) }
                                     )
                                 }
                             }
@@ -223,6 +226,10 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                 focusedBorder = Border(
                                     border = BorderStroke(1.dp, StatusCyan),
                                     shape = MaterialTheme.shapes.extraSmall
+                                ),
+                                pressedBorder = Border(
+                                    border = BorderStroke(1.dp, StatusCyan),
+                                    shape = MaterialTheme.shapes.extraSmall
                                 )
                             ),
                             modifier = Modifier.clickable { viewModel.startAddIdentity() }
@@ -239,11 +246,12 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         StatusCard(
                             title = if (isSourceLinked) "Source Monitor" else "Tracker Status",
                             status = sourceMonitorStatus,
-                            color = when (sourceMonitorStatus) {
-                                "Active" -> StatusGreen
-                                "Ready" -> StatusCyan
-                                "Content Mismatch" -> Color(0xFFFFA500)
-                                "No Media" -> Color(0xFF87CEEB)
+                            color = when {
+                                sourceMonitorStatus.contains("Active") -> StatusGreen
+                                sourceMonitorStatus == "Ready" -> StatusCyan
+                                sourceMonitorStatus == "Content Mismatch" -> Color(0xFFFFA500)
+                                sourceMonitorStatus.contains("Internal") -> StatusCyan
+                                sourceMonitorStatus == "No Media" -> Color(0xFF87CEEB)
                                 else -> StatusRed
                             },
                             modifier = Modifier.weight(1f)
@@ -296,11 +304,32 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "Active Multi-Site Identities (${identities.size})",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = Color.Gray
-                                )
+                                Surface(
+                                    onClick = { /* Informational focus */ },
+                                    shape = ClickableSurfaceDefaults.shape(MaterialTheme.shapes.small),
+                                    colors = ClickableSurfaceDefaults.colors(
+                                        containerColor = Color.Transparent,
+                                        focusedContainerColor = Color.White.copy(alpha = 0.05f)
+                                    ),
+                                    border = ClickableSurfaceDefaults.border(
+                                        focusedBorder = Border(
+                                            border = BorderStroke(1.dp, StatusCyan),
+                                            shape = MaterialTheme.shapes.small
+                                        ),
+                                        pressedBorder = Border(
+                                            border = BorderStroke(1.dp, StatusCyan),
+                                            shape = MaterialTheme.shapes.small
+                                        )
+                                    ),
+                                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                                ) {
+                                    Text(
+                                        modifier = Modifier.padding(8.dp),
+                                        text = "Active Multi-Site Identities (${identities.size})",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = Color.Gray
+                                    )
+                                }
 
                                 TvButton(
                                     onClick = { viewModel.clearData() },
@@ -312,6 +341,10 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                 ),
                                 border = TvButtonDefaults.border(
                                     focusedBorder = Border(
+                                        border = BorderStroke(1.dp, StatusCyan),
+                                        shape = MaterialTheme.shapes.extraSmall
+                                    ),
+                                    pressedBorder = Border(
                                         border = BorderStroke(1.dp, StatusCyan),
                                         shape = MaterialTheme.shapes.extraSmall
                                     )
@@ -420,6 +453,10 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                 focusedBorder = Border(
                                     border = BorderStroke(1.dp, StatusCyan),
                                     shape = MaterialTheme.shapes.extraSmall
+                                ),
+                                pressedBorder = Border(
+                                    border = BorderStroke(1.dp, StatusCyan),
+                                    shape = MaterialTheme.shapes.extraSmall
                                 )
                             ),
                             modifier = Modifier.clickable { showLogoutDialog = true }
@@ -452,96 +489,95 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         val mediaType = when {
                             isHubSyncing || !isSourcePreviewEnabled -> "reference"
                             mismatchedTitle != null -> "mismatch"
+                            campaign != null && campaign.localPath != null -> {
+                                val url = campaign.mediaUrl?.lowercase() ?: ""
+                                if (campaign.mediaType?.lowercase() == "image" ||
+                                    url.endsWith(".jpg") || url.endsWith(".jpeg") ||
+                                    url.endsWith(".png") || url.endsWith(".webp")) "image" else "video"
+                            }
                             isSourceLinked -> "mirror"
-                            campaign == null -> "none"
-                            campaign.mediaType?.lowercase() == "image" ||
-                                    campaign.mediaUrl?.lowercase()?.let {
-                                        it.endsWith(".jpg") || it.endsWith(".jpeg") ||
-                                                it.endsWith(".png") || it.endsWith(".webp")
-                                    } == true -> "image"
-
-                            else -> "video"
+                            else -> "none"
                         }
 
-                        when (mediaType) {
-                            "reference" -> {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(Color(0xFF1E2136)),
-                                    contentAlignment = Alignment.TopStart
-                                ) {
-                                    Column(modifier = Modifier.padding(16.dp)) {
-                                        Text(
-                                            "Campaign Reference",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = StatusCyan,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Spacer(modifier = Modifier.height(12.dp))
-                                        identities.forEach { identity ->
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(vertical = 4.dp),
-                                                horizontalArrangement = Arrangement.SpaceBetween
-                                            ) {
-                                                Text(
-                                                    identity.siteId,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = Color.White
-                                                )
-                                                Text(
-                                                    if (identity.isDownloading) "Downloading..." else "Done",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = if (identity.isDownloading) StatusYellow else StatusGreen,
-                                                    fontWeight = FontWeight.Bold
-                                                )
+                        Crossfade(targetState = mediaType, label = "MediaSwitch") { type ->
+                            when (type) {
+                                "reference" -> {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(Color(0xFF1E2136)),
+                                        contentAlignment = Alignment.TopStart
+                                    ) {
+                                        Column(modifier = Modifier.padding(16.dp)) {
+                                            Text(
+                                                "Campaign Reference",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = StatusCyan,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            identities.forEach { identity ->
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(vertical = 4.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Text(
+                                                        identity.siteId,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = Color.White
+                                                    )
+                                                    Text(
+                                                        if (identity.isDownloading) "Downloading..." else "Done",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = if (identity.isDownloading) StatusYellow else StatusGreen,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
                                             }
                                         }
                                     }
                                 }
-                            }
 
-                            "mirror" -> {
-                                SourceMonitorPreview(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(Color(0xFF1E2136)),
-                                    signalMonitor = viewModel.signalMonitor,
-                                    siteId = currentMediaCampaign?.campaignTag
-                                )
-                            }
+                                "mirror" -> {
+                                    SourceMonitorPreview(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(Color(0xFF1E2136)),
+                                        signalMonitor = viewModel.signalMonitor,
+                                        siteId = currentMediaCampaign?.campaignTag
+                                    )
+                                }
 
-                            "mismatch" -> {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(Color(0xFF2C1E1E)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text(
-                                            "UNAUTHORIZED CONTENT",
-                                            color = StatusRed,
-                                            fontWeight = FontWeight.Bold,
-                                            style = MaterialTheme.typography.labelLarge
-                                        )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Text(
-                                            mismatchedTitle ?: "",
-                                            color = Color.White,
-                                            textAlign = TextAlign.Center,
-                                            modifier = Modifier.padding(horizontal = 16.dp),
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
+                                "mismatch" -> {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(Color(0xFF2C1E1E)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(
+                                                "UNAUTHORIZED CONTENT",
+                                                color = StatusRed,
+                                                fontWeight = FontWeight.Bold,
+                                                style = MaterialTheme.typography.labelLarge
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                mismatchedTitle ?: "",
+                                                color = Color.White,
+                                                textAlign = TextAlign.Center,
+                                                modifier = Modifier.padding(horizontal = 16.dp),
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
                                     }
                                 }
-                            }
 
-                            "image" -> {
-                                Crossfade(targetState = campaign, label = "ImageTransition") { imgCampaign ->
-                                    val imageModel = imgCampaign?.localPath ?: imgCampaign?.mediaUrl
+                                "image" -> {
+                                    val imageModel = currentMediaCampaign?.localPath ?: currentMediaCampaign?.mediaUrl
                                     AsyncImage(
                                         model = imageModel,
                                         contentDescription = null,
@@ -551,55 +587,51 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                         contentScale = ContentScale.Fit
                                     )
                                 }
-                            }
 
-                            "video" -> {
-                                AndroidView(
-                                    factory = { ctx ->
-                                        PlayerView(ctx).apply {
-                                            player = playbackManager.player
-                                            useController = false
-                                            @Suppress("DEPRECATION")
-                                            useArtwork = false
-                                            setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                                            setBackgroundColor(android.graphics.Color.BLACK)
-                                            try {
-                                                val method = javaClass.getMethod("setSurfaceType", Int::class.javaPrimitiveType)
-                                                method.invoke(this, 2)
-                                            } catch (e: Exception) {
+                                "video" -> {
+                                    AndroidView(
+                                        factory = { ctx ->
+                                            PlayerView(ctx).apply {
+                                                player = playbackManager.player
+                                                useController = false
+                                                @Suppress("DEPRECATION")
+                                                useArtwork = false
+                                                setShutterBackgroundColor(android.graphics.Color.BLACK)
+                                                setBackgroundColor(android.graphics.Color.BLACK)
+
+                                                setKeepContentOnPlayerReset(true)
+                                                keepScreenOn = true
                                             }
-                                            setKeepContentOnPlayerReset(true)
-                                            keepScreenOn = true
-                                        }
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(Color.Black),
-                                    update = { view ->
-                                        if (view.player != playbackManager.player) view.player = playbackManager.player
-                                    },
-                                    onRelease = { view -> view.player = null }
-                                )
-                            }
-
-                            else -> {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    val text = if (anyCampaignActive) {
-                                        when {
-                                            !isSourceLinked -> "Waiting for Source Monitor Link..."
-                                            identities.any { it.status == "No Media" } -> "Waiting for valid media transmission..."
-                                            else -> "Preparing campaigns..."
-                                        }
-                                    } else {
-                                        "No Active Content"
-                                    }
-                                    Text(
-                                        text = text,
-                                        color = Color.Gray,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.padding(16.dp),
-                                        style = MaterialTheme.typography.bodyMedium
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(Color.Black),
+                                        update = { view ->
+                                            if (view.player != playbackManager.player) view.player = playbackManager.player
+                                        },
+                                        onRelease = { view -> view.player = null }
                                     )
+                                }
+
+                                else -> {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        val text = if (anyCampaignActive) {
+                                            when {
+                                                !isSourceLinked -> "Waiting for Source Monitor Link..."
+                                                identities.any { it.status == "No Media" } -> "Waiting for valid media transmission..."
+                                                else -> "Preparing campaigns..."
+                                            }
+                                        } else {
+                                            "No Active Content"
+                                        }
+                                        Text(
+                                            text = text,
+                                            color = Color.Gray,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.padding(16.dp),
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -676,6 +708,10 @@ fun IdentityHubCard(identity: IdentityUiModel, onRemove: (String) -> Unit, onIns
             focusedBorder = Border(
                 border = BorderStroke(1.dp, StatusCyan),
                 shape = MaterialTheme.shapes.medium
+            ),
+            pressedBorder = Border(
+                border = BorderStroke(1.dp, StatusCyan),
+                shape = MaterialTheme.shapes.medium
             )
         ),
         modifier = Modifier
@@ -692,7 +728,7 @@ fun IdentityHubCard(identity: IdentityUiModel, onRemove: (String) -> Unit, onIns
                 Text(
                     text = identity.siteId,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White,
+                    color = if(isDarkMode) Color.White else Color.Black.copy(alpha = 0.6f),
                     fontWeight = FontWeight.Bold
                 )
                 Text(text = "User: ${identity.username}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
@@ -819,6 +855,10 @@ fun StatusCard(
         ),
         border = ClickableSurfaceDefaults.border(
             focusedBorder = Border(
+                border = BorderStroke(1.dp, StatusCyan),
+                shape = MaterialTheme.shapes.medium
+            ),
+            pressedBorder = Border(
                 border = BorderStroke(1.dp, StatusCyan),
                 shape = MaterialTheme.shapes.medium
             )
@@ -1028,6 +1068,10 @@ fun LogoutDialog(onDismiss: () -> Unit, onConfirm: () -> Unit, focusRequester: F
                             focusedBorder = Border(
                                 border = BorderStroke(1.dp, StatusCyan),
                                 shape = MaterialTheme.shapes.extraSmall
+                            ),
+                            pressedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
                             )
                         ),
                         modifier = Modifier
@@ -1038,6 +1082,10 @@ fun LogoutDialog(onDismiss: () -> Unit, onConfirm: () -> Unit, focusRequester: F
                         onClick = onDismiss,
                         border = TvButtonDefaults.border(
                             focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            ),
+                            pressedBorder = Border(
                                 border = BorderStroke(1.dp, StatusCyan),
                                 shape = MaterialTheme.shapes.extraSmall
                             )
@@ -1086,6 +1134,10 @@ fun RestartDialog(onDismiss: () -> Unit, onConfirm: () -> Unit, focusRequester: 
                             focusedBorder = Border(
                                 border = BorderStroke(1.dp, StatusCyan),
                                 shape = MaterialTheme.shapes.extraSmall
+                            ),
+                            pressedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
                             )
                         ),
                         modifier = Modifier
@@ -1096,6 +1148,10 @@ fun RestartDialog(onDismiss: () -> Unit, onConfirm: () -> Unit, focusRequester: 
                         onClick = onDismiss,
                         border = TvButtonDefaults.border(
                             focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            ),
+                            pressedBorder = Border(
                                 border = BorderStroke(1.dp, StatusCyan),
                                 shape = MaterialTheme.shapes.extraSmall
                             )
@@ -1159,6 +1215,10 @@ fun ExportDialog(viewModel: DashboardViewModel, onDismiss: () -> Unit, focusRequ
                                 focusedBorder = Border(
                                     border = BorderStroke(1.dp, StatusCyan),
                                     shape = MaterialTheme.shapes.extraSmall
+                                ),
+                                pressedBorder = Border(
+                                    border = BorderStroke(1.dp, StatusCyan),
+                                    shape = MaterialTheme.shapes.extraSmall
                                 )
                             ),
                             modifier = Modifier.fillMaxWidth()
@@ -1185,9 +1245,15 @@ fun ExportDialog(viewModel: DashboardViewModel, onDismiss: () -> Unit, focusRequ
                             focusedBorder = Border(
                                 border = BorderStroke(1.dp, StatusCyan),
                                 shape = MaterialTheme.shapes.extraSmall
+                            ),
+                            pressedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
                             )
                         ),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { selectedCampaignId = null; searchQuery = "All Campaigns" }
                     ) { Text("Select All") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1201,6 +1267,10 @@ fun ExportDialog(viewModel: DashboardViewModel, onDismiss: () -> Unit, focusRequ
                         },
                         border = TvButtonDefaults.border(
                             focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            ),
+                            pressedBorder = Border(
                                 border = BorderStroke(1.dp, StatusCyan),
                                 shape = MaterialTheme.shapes.extraSmall
                             )
@@ -1227,6 +1297,10 @@ fun ExportDialog(viewModel: DashboardViewModel, onDismiss: () -> Unit, focusRequ
                             focusedBorder = Border(
                                 border = BorderStroke(1.dp, StatusCyan),
                                 shape = MaterialTheme.shapes.extraSmall
+                            ),
+                            pressedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
                             )
                         ),
                         modifier = Modifier.clickable {
@@ -1241,6 +1315,10 @@ fun ExportDialog(viewModel: DashboardViewModel, onDismiss: () -> Unit, focusRequ
                         onClick = onDismiss,
                         border = TvButtonDefaults.border(
                             focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            ),
+                            pressedBorder = Border(
                                 border = BorderStroke(1.dp, StatusCyan),
                                 shape = MaterialTheme.shapes.extraSmall
                             )
