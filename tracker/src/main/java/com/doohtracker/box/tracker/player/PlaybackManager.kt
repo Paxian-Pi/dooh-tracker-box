@@ -202,9 +202,14 @@ class PlaybackManager @Inject constructor(
                     p.repeatMode = Player.REPEAT_MODE_ALL
                     Log.d("Playback", "Calling prepare...")
                     p.prepare()
-                    Log.d("Playback", "Calling play...")
-                    p.play()
-                    Log.d("Playback", "Play called. Current state: ${getStateName(p.playbackState)}")
+                    
+                    // Delay play() to ensure surface is ready
+                    playerScope.launch {
+                        delay(100)
+                        Log.d("Playback", "Calling play after surface ready delay...")
+                        p.play()
+                        Log.d("Playback", "Play called. Current state: ${getStateName(p.playbackState)}")
+                    }
                 } catch (e: Exception) {
                     Log.e("Playback", "Failed to start video playback for ${campaign.name}", e)
                 }
