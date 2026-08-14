@@ -598,7 +598,6 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                                 useArtwork = false
                                                 setShutterBackgroundColor(android.graphics.Color.BLACK)
                                                 setBackgroundColor(android.graphics.Color.BLACK)
-                                                setResizeMode(PlayerView.RESIZE_MODE_FIT)
                                                 setKeepContentOnPlayerReset(true)
                                                 keepScreenOn = true
                                             }

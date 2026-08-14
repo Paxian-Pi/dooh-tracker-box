@@ -58,8 +58,8 @@ class PlaybackManager @Inject constructor(
             _player = ExoPlayer.Builder(context, renderersFactory)
                 .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
                 .build().apply {
-                    repeatMode = Player.REPEAT_MODE_OFF // Handle per-item
-                    volume = 0f // Quiet mirroring
+                    repeatMode = Player.REPEAT_MODE_OFF
+                    volume = 0f
                     addListener(object : Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
                             Log.d("Playback", "State: ${getStateName(playbackState)}")
