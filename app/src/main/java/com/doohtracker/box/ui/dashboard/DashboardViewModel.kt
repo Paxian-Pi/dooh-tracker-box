@@ -87,23 +87,30 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
         isSourceLinked,
         anyCampaignActive,
         campaignRepository.allCampaigns,
-        signalMonitor.allSourceMetadata
-    ) { linked, anyActive, all, allMetadata ->
+        signalMonitor.allSourceMetadata,
+        campaignRepository.deviceManager.isLocalMonitoringEnabledFlow
+    ) { linked, anyActive, all, allMetadata, isLocalEnabled ->
         val metadata = allMetadata.values.firstOrNull() 
         when {
             linked -> {
                 val reportedTitle = metadata?.mediaTitle?.lowercase() ?: ""
+                val isLocal = metadata?.hostname == "Local-Android-System" || isLocalEnabled
+                
                 val hasContentMatchInSystem = all.any { campaign ->
                     val fileName = campaign.sourceFilename?.lowercase() ?: ""
                     (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
                     reportedTitle.contains(campaign.name.lowercase())
                 } && reportedTitle != "none"
 
-                if (hasContentMatchInSystem) "Active"
-                else if (reportedTitle == "none" || reportedTitle.isEmpty()) "No Media"
-                else "Content Mismatch"
+                if (hasContentMatchInSystem) {
+                    if (isLocal) "Active (Internal)" else "Active"
+                } else if (reportedTitle == "none" || reportedTitle.isEmpty()) {
+                    if (isLocal) "Idle (Internal)" else "No Media"
+                } else {
+                    "Content Mismatch"
+                }
             }
-            all.isNotEmpty() -> "Ready"
+            all.isNotEmpty() -> if (isLocalEnabled) "Waiting for Local Player..." else "Ready"
             else -> "Inactive"
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Inactive")
@@ -138,8 +145,11 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
             val reportedTitle = metadata?.mediaTitle?.lowercase() ?: ""
             val matchedCampaigns = identityCampaigns.filter { campaign ->
                 val fileName = campaign.sourceFilename?.lowercase() ?: ""
-                (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
-                reportedTitle.contains(campaign.name.lowercase())
+                val isMatch = (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
+                             reportedTitle.contains(campaign.name.lowercase())
+                
+                // Dashboard Compliance: Only show "Active" if window is open
+                isMatch && campaign.startTime <= currentTime && campaign.endTime >= currentTime
             }.takeIf { reportedTitle != "none" && reportedTitle.isNotEmpty() } ?: emptyList()
 
             val isTimedOut = (currentTime - (metadata?.lastSeen ?: 0L)) > 15000
@@ -166,7 +176,12 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
                 }
             }
 
-            val allAdsString = identityCampaigns.joinToString(" | ") { it.name }.ifEmpty { "Waiting for source monitor" }
+            val allAdsString = identityCampaigns.joinToString(" | ") { it.name }.ifEmpty { "No Ads Staged" }
+            val scheduledAdsString = identityCampaigns
+                .filter { it.startTime <= currentTime && it.endTime >= currentTime }
+                .joinToString(" | ") { it.name }
+                .ifEmpty { "No Scheduled Campaigns" }
+
             val siteSeenAds = seenAdsMap[siteId]?.keys?.toList() ?: emptyList()
             
             IdentityUiModel(
@@ -176,12 +191,7 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
                 statusColor = statusColor,
                 currentCampaign = when {
                     isDownloading -> "Downloading content..."
-                    status == "Active" || status == "Content Mismatch" -> {
-                        if (siteSeenAds.isNotEmpty()) siteSeenAds.joinToString(" | ")
-                        else if (status == "Active") "Waiting for match..."
-                        else "Content Mismatch"
-                    }
-                    else -> allAdsString 
+                    else -> scheduledAdsString
                 },
                 allDownloadedAds = allAdsString,
                 downloadedCount = identityCampaigns.size,
@@ -195,13 +205,13 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     @OptIn(FlowPreview::class)
     val isHubSyncing: StateFlow<Boolean> = combine(
         identities,
-        campaignRepository.isDownloadingFiles
-    ) { identityList, downloadingFiles ->
-        // Hub is syncing if ANY identity is marked as downloading
-        // OR if the repo is actively pulling files
-        identityList.any { it.isDownloading } || downloadingFiles
+        campaignRepository.isHubSyncing
+    ) { identityList, repoSyncing ->
+        // Hub is syncing if ANY identity is in initial setup (zero ads)
+        // OR if the repository reports missing files for ACTIVE scheduled campaigns
+        identityList.any { it.isDownloading } || repoSyncing
     }.debounce { syncing -> 
-        if (syncing) 0L else 1500L // Increased buffer to 1.5s to prevent flickering when sync finishes
+        if (syncing) 500L else 3000L // Heavy buffer: wait 3s before declaring "Sync Done" to prevent flickering
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private val _isSourcePreviewEnabled = MutableStateFlow(campaignRepository.isSourcePreviewEnabled())

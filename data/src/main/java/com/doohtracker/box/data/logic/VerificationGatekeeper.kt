@@ -41,14 +41,15 @@ class VerificationGatekeeper @Inject constructor(
             // 2. Source Monitor must be linked
             if (!isSourceActive || allMetadata.isEmpty()) return@combine false
 
-            // 3. Content Verification Rule (Targeted Strictly)
-            // Only allow tracking if we have a match where SiteID in Pulse == SiteID in System
+            // 3. Content Verification Rule (Targeted Strictly - Active Only)
+            // Only allow tracking if we have a match where SiteID in Pulse == SiteID in System AND window is open
             val allCampaigns = campaignRepository.allCampaigns.first()
             val hasTargetedMatch = allMetadata.any { (reportingSiteId, metadata) ->
                 val reportedTitle = metadata.mediaTitle.lowercase()
                 reportedTitle != "none" && allCampaigns.any { campaign ->
-                    // MUST match both Site ID AND Title
-                    campaign.campaignTag.equals(reportingSiteId, ignoreCase = true) && (
+                    // MUST match both Site ID AND Title AND be active
+                    campaign.campaignTag.equals(reportingSiteId, ignoreCase = true) && 
+                    campaign.startTime <= currentTime && campaign.endTime >= currentTime && (
                         (campaign.sourceFilename?.lowercase()?.isNotEmpty() == true && reportedTitle.contains(campaign.sourceFilename.lowercase())) || 
                         reportedTitle.contains(campaign.name.lowercase())
                     )

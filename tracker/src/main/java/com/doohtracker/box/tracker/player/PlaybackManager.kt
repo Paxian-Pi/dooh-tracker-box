@@ -27,7 +27,8 @@ import kotlin.time.Duration.Companion.seconds
 class PlaybackManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val campaignRepository: CampaignRepository,
-    private val gatekeeper: VerificationGatekeeper
+    private val gatekeeper: VerificationGatekeeper,
+    private val timeProvider: TimeProvider
 ) {
     private val playerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     
@@ -57,14 +58,23 @@ class PlaybackManager @Inject constructor(
             _player = ExoPlayer.Builder(context, renderersFactory)
                 .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
                 .build().apply {
-                    repeatMode = Player.REPEAT_MODE_ALL // Repeat the same item until title changes
+                    repeatMode = Player.REPEAT_MODE_OFF // Handle per-item
+                    volume = 0f // Quiet mirroring
                     addListener(object : Player.Listener {
+                        override fun onPlaybackStateChanged(playbackState: Int) {
+                            Log.d("Playback", "State: ${getStateName(playbackState)}")
+                        }
+
                         override fun onRenderedFirstFrame() {
                             Log.d("Playback", "SUCCESS: Video frame rendered for current item!")
                         }
 
                         override fun onPlayerError(error: PlaybackException) {
                             Log.e("Playback", "ExoPlayer Error: ${error.message} (Code: ${error.errorCode})", error)
+                        }
+
+                        override fun onIsPlayingChanged(isPlaying: Boolean) {
+                            Log.d("Playback", "IsPlaying: $isPlaying")
                         }
                     })
                 }
@@ -98,9 +108,12 @@ class PlaybackManager @Inject constructor(
                     return@combine
                 }
 
-                // Find a match in our system across all clients
+                // Find a match in our system across all clients (STRICT COMPLIANCE: Active Only)
+                val currentTime = timeProvider.getCurrentTimeMillis()
                 val allCampaigns = campaignRepository.allCampaigns.first()
-                val matchedCampaign = allCampaigns.find { campaign ->
+                val matchedCampaign = allCampaigns.filter { 
+                    it.startTime <= currentTime && it.endTime >= currentTime 
+                }.find { campaign ->
                     val fileName = campaign.sourceFilename?.lowercase() ?: ""
                     val campaignName = campaign.name.lowercase()
                     (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
@@ -138,6 +151,14 @@ class PlaybackManager @Inject constructor(
         isPlaying = false
     }
 
+    private fun getStateName(state: Int): String = when (state) {
+        Player.STATE_IDLE -> "IDLE"
+        Player.STATE_BUFFERING -> "BUFFERING"
+        Player.STATE_READY -> "READY"
+        Player.STATE_ENDED -> "ENDED"
+        else -> "UNKNOWN"
+    }
+
     private fun playCampaign(campaign: CampaignEntity) {
         imageTimerJob?.cancel()
         _currentCampaign.value = campaign
@@ -150,19 +171,43 @@ class PlaybackManager @Inject constructor(
 
         if (isExplicitImage) {
             Log.d("Playback", "Mirroring IMAGE: ${campaign.name}")
-            // No timer needed, will stay on screen until collectLatest triggers next change
+            _player?.stop()
+            _player?.clearMediaItems()
         } else {
             Log.d("Playback", "Mirroring VIDEO: ${campaign.name}")
             _player?.let { p ->
-                val uri = campaign.localPath?.let { android.net.Uri.fromFile(java.io.File(it)) }
-                    ?: android.net.Uri.parse(campaign.mediaUrl)
+                try {
+                    Log.d("Playback", "Current player state before stop: ${getStateName(p.playbackState)}")
+                    p.stop()
+                    p.clearMediaItems()
+                    
+                    val uri = campaign.localPath?.let { path ->
+                        val file = java.io.File(path)
+                        if (file.exists() && file.length() > 0) {
+                            Log.d("Playback", "Using local file: $path (size: ${file.length()} bytes)")
+                            android.net.Uri.fromFile(file)
+                        } else {
+                            Log.d("Playback", "Local file missing/empty: $path, falling back to URL")
+                            null
+                        }
+                    } ?: android.net.Uri.parse(campaign.mediaUrl)
 
-                p.setMediaItem(MediaItem.Builder()
-                    .setUri(uri)
-                    .setMediaId(campaign.id)
-                    .build())
-                p.prepare()
-                p.play()
+                    Log.d("Playback", "Preparing player for ${campaign.name} with URI: $uri")
+                    
+                    p.setMediaItem(MediaItem.Builder()
+                        .setUri(uri)
+                        .setMediaId(campaign.id)
+                        .build())
+                    
+                    p.repeatMode = Player.REPEAT_MODE_ALL
+                    Log.d("Playback", "Calling prepare...")
+                    p.prepare()
+                    Log.d("Playback", "Calling play...")
+                    p.play()
+                    Log.d("Playback", "Play called. Current state: ${getStateName(p.playbackState)}")
+                } catch (e: Exception) {
+                    Log.e("Playback", "Failed to start video playback for ${campaign.name}", e)
+                }
             }
         }
     }

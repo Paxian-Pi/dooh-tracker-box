@@ -1,5 +1,6 @@
 package com.doohtracker.box.ui.activation
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -13,12 +14,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -41,10 +44,25 @@ fun ActivationScreen(viewModel: ActivationViewModel, clearHub: DashboardViewMode
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val stagedIdentities by viewModel.stagedIdentities.collectAsState()
+    val isNotificationAccessGranted by viewModel.isNotificationAccessGranted.collectAsState()
+    val isLocalMonitorEnabled by viewModel.isLocalMonitoringEnabled.collectAsState()
 
+    val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val addBtnFocusRequester = remember { FocusRequester() }
+
+    // Refresh permission status when returning to app
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.checkInternalPermission()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(isLoading) {
         if (isLoading) {
@@ -112,7 +130,7 @@ fun ActivationScreen(viewModel: ActivationViewModel, clearHub: DashboardViewMode
                     placeholder = "Enter username",
                     imeAction = if (stagedIdentities.isEmpty()) ImeAction.Next else ImeAction.Done,
                     onDone = {
-                        if (stagedIdentities.isNotEmpty()) viewModel.validateAndAddIdentity()
+//                        if (stagedIdentities.isNotEmpty()) viewModel.validateAndAddIdentity()
                     }
                 )
 
@@ -123,13 +141,82 @@ fun ActivationScreen(viewModel: ActivationViewModel, clearHub: DashboardViewMode
                         label = "Global Location Details",
                         placeholder = "e.g. LOC_AIRPORT_LAGOS",
                         imeAction = ImeAction.Done,
-                        onDone = { viewModel.validateAndAddIdentity() },
+                        onDone = { /* viewModel.validateAndAddIdentity() */ },
                         modifier = Modifier.height(80.dp)
                     )
                 }
 
                 if (errorMessage != null) {
                     Text(text = errorMessage!!, color = StatusRed, style = MaterialTheme.typography.bodySmall)
+                }
+
+                // Internal Player Monitoring Toggle
+                Surface(
+                    onClick = { viewModel.onLocalMonitoringToggle(!isLocalMonitorEnabled) },
+                    shape = ClickableSurfaceDefaults.shape(MaterialTheme.shapes.small),
+                    colors = ClickableSurfaceDefaults.colors(
+                        containerColor = Color.Transparent,
+                        focusedContainerColor = Color.White.copy(alpha = 0.05f)
+                    ),
+                    border = ClickableSurfaceDefaults.border(
+                        focusedBorder = Border(
+                            border = BorderStroke(1.dp, StatusCyan),
+                            shape = MaterialTheme.shapes.small
+                        ),
+                        pressedBorder = Border(
+                            border = BorderStroke(1.dp, StatusCyan),
+                            shape = MaterialTheme.shapes.small
+                        )
+                    ),
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Monitor Internal Android Player",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = if (isLocalMonitorEnabled && !isNotificationAccessGranted) StatusRed else Color.White
+                            )
+                            Text(
+                                text = "For players running on this same box. Suppresses external network discovery.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray
+                            )
+                        }
+                        Switch(
+                            checked = isLocalMonitorEnabled,
+                            onCheckedChange = { viewModel.onLocalMonitoringToggle(it) },
+                            modifier = Modifier.scale(0.8f)
+                        )
+                    }
+                }
+
+                if (isLocalMonitorEnabled && !isNotificationAccessGranted) {
+                    Button(
+                        onClick = {
+                            context.startActivity(android.content.Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
+                        },
+                        colors = ButtonDefaults.colors(containerColor = StatusRed.copy(alpha = 0.2f), contentColor = Color.White),
+                        border = ButtonDefaults.border(
+                            focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            ),
+                            pressedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            )
+                        ),
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp).height(45.dp).clickable {
+                            context.startActivity(android.content.Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
+                        }
+                    ) {
+                        Text("Grant Notification Access", style = MaterialTheme.typography.labelSmall)
+                    }
                 }
 
                 Row(
@@ -140,7 +227,17 @@ fun ActivationScreen(viewModel: ActivationViewModel, clearHub: DashboardViewMode
                 ) {
                     Button(
                         onClick = { viewModel.validateAndAddIdentity() },
-                        enabled = !isLoading,
+                        enabled = !isLoading && (!isLocalMonitorEnabled || isNotificationAccessGranted),
+                        border = ButtonDefaults.border(
+                            focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            ),
+                            pressedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            )
+                        ),
                         modifier = Modifier
                             .weight(1f)
                             .focusRequester(addBtnFocusRequester)
@@ -155,11 +252,21 @@ fun ActivationScreen(viewModel: ActivationViewModel, clearHub: DashboardViewMode
 
                     Button(
                         onClick = { viewModel.finishActivation() },
-                        enabled = stagedIdentities.isNotEmpty() && !isLoading,
+                        enabled = stagedIdentities.isNotEmpty() && !isLoading && (!isLocalMonitorEnabled || isNotificationAccessGranted),
                         colors = ButtonDefaults.colors(containerColor = Color(0xFF3DAB76), contentColor = Color.Black),
+                        border = ButtonDefaults.border(
+                            focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            ),
+                            pressedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            )
+                        ),
                         modifier = Modifier
                             .weight(1f)
-                            .clickable { if (stagedIdentities.isNotEmpty() && !isLoading) viewModel.finishActivation() }
+                            .clickable { if (stagedIdentities.isNotEmpty() && !isLoading && (!isLocalMonitorEnabled || isNotificationAccessGranted)) viewModel.finishActivation() }
                     ) {
                         Text("Start Hub", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                     }
@@ -181,6 +288,16 @@ fun ActivationScreen(viewModel: ActivationViewModel, clearHub: DashboardViewMode
                         onClick = { clearHub.clearData() },
                         enabled = stagedIdentities.isNotEmpty() && !isLoading,
                         colors = ButtonDefaults.colors(containerColor = Color(0xFF3DAB76), contentColor = Color.Black),
+                        border = ButtonDefaults.border(
+                            focusedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            ),
+                            pressedBorder = Border(
+                                border = BorderStroke(1.dp, StatusCyan),
+                                shape = MaterialTheme.shapes.extraSmall
+                            )
+                        ),
                         modifier = Modifier
                             .clickable { clearHub.clearData() }
                     ) {
@@ -267,6 +384,16 @@ fun TvInputField(
                 containerColor = Color(0xFF1E2136),
                 contentColor = Color.White,
                 focusedContainerColor = Color(0xFF2A2D4A)
+            ),
+            border = ClickableSurfaceDefaults.border(
+                focusedBorder = Border(
+                    border = BorderStroke(1.dp, StatusCyan),
+                    shape = MaterialTheme.shapes.small
+                ),
+                pressedBorder = Border(
+                    border = BorderStroke(1.dp, StatusCyan),
+                    shape = MaterialTheme.shapes.small
+                )
             ),
             modifier = Modifier
                 .onFocusChanged {

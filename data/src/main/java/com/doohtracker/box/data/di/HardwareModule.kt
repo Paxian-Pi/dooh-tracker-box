@@ -1,5 +1,7 @@
 package com.doohtracker.box.data.di
 
+import com.doohtracker.box.data.hardware.InternalMediaMonitor
+import com.doohtracker.box.data.hardware.InternalMediaMonitorImpl
 import com.doohtracker.box.data.hardware.SignalMonitor
 import com.doohtracker.box.data.hardware.SignalMonitorImpl
 import com.doohtracker.box.data.hardware.UsbConnectionMonitor
@@ -33,4 +35,10 @@ abstract class HardwareModule {
     abstract fun bindSystemHealthMonitor(
         impl: SystemHealthMonitorImpl
     ): SystemHealthMonitor
+
+    @Binds
+    @Singleton
+    abstract fun bindInternalMediaMonitor(
+        impl: InternalMediaMonitorImpl
+    ): InternalMediaMonitor
 }

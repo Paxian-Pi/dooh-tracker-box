@@ -15,6 +15,7 @@ import com.doohtracker.box.data.time.TimeProvider
 import com.doohtracker.box.data.util.baseUrl
 import com.doohtracker.box.data.hardware.SignalMonitor
 import com.doohtracker.box.data.hardware.SourceMetadata
+import com.doohtracker.box.data.hardware.InternalMediaMonitor
 import android.util.Log
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -30,6 +31,7 @@ class CampaignRepository @Inject constructor(
     private val trackingLogDao: TrackingLogDao,
     val deviceManager: DeviceManager,
     private val signalMonitor: SignalMonitor,
+    val internalMediaMonitor: InternalMediaMonitor,
     private val mediaDownloader: MediaDownloader,
     private val timeProvider: TimeProvider
 ) {
@@ -37,6 +39,7 @@ class CampaignRepository @Inject constructor(
     val recentLogs: Flow<List<TrackingLogEntity>> = trackingLogDao.getRecentLogs()
     val identities: Flow<List<Identity>> = deviceManager.identitiesFlow
     val isDarkModeEnabled: Flow<Boolean> = deviceManager.isDarkModeEnabledFlow
+    val isLocalMonitoringEnabled: Flow<Boolean> = deviceManager.isLocalMonitoringEnabledFlow
 
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
@@ -45,11 +48,18 @@ class CampaignRepository @Inject constructor(
     val isDownloadingFiles: StateFlow<Boolean> = _isDownloadingFiles.asStateFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
-    val isHubSyncing: Flow<Boolean> = combine(_isDownloadingFiles, allCampaigns) { downloading, campaigns ->
-        downloading || (campaigns.isNotEmpty() && campaigns.any { it.mediaUrl != null && it.localPath == null })
-    }.debounce { syncing ->
-        if (syncing) 0L else 1000L // Delay switching to "Done" by 1s to smooth out rapid database updates
+    val isHubSyncing: Flow<Boolean> = allCampaigns.map { campaigns ->
+        val now = timeProvider.getCurrentTimeMillis()
+        val hasMissingActiveFiles = campaigns.any { 
+            it.startTime <= now && it.endTime >= now && it.mediaUrl != null && it.localPath == null 
+        }
+        val hasNoCampaigns = campaigns.isEmpty() && deviceManager.isActivated()
+        
+        hasNoCampaigns || hasMissingActiveFiles
     }.distinctUntilChanged()
+    .debounce { syncing ->
+        if (syncing) 0L else 2000L // 2s stabilization buffer
+    }
 
     // Hub Tracking: Keyed by Site ID
     private val activeSessions = mutableMapOf<String, PlaybackSession>()
@@ -194,13 +204,15 @@ class CampaignRepository @Inject constructor(
         val reportedTitle = metadata.mediaTitle.lowercase()
         val allCampaignsNow = campaignDao.getAllCampaigns().first()
 
-        // 1. TARGETED MATCH: Only match campaigns that belong to the reporting Site ID
-        val matchedCampaign = allCampaignsNow.filter { it.campaignTag.equals(metadata.siteId, ignoreCase = true) }
-            .find { campaign ->
-                val fileName = campaign.sourceFilename?.lowercase() ?: ""
-                val campaignName = campaign.name.lowercase()
-                (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || reportedTitle.contains(campaignName)
-            }?.takeIf { reportedTitle != "none" }
+        // 1. TARGETED MATCH (Active Only): Only match campaigns that belong to the reporting Site ID AND are within their active time window
+        val matchedCampaign = allCampaignsNow.filter { 
+            it.campaignTag.equals(metadata.siteId, ignoreCase = true) &&
+            it.startTime <= currentTime && it.endTime >= currentTime // STRICT COMPLIANCE: Window check
+        }.find { campaign ->
+            val fileName = campaign.sourceFilename?.lowercase() ?: ""
+            val campaignName = campaign.name.lowercase()
+            (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || reportedTitle.contains(campaignName)
+        }?.takeIf { reportedTitle != "none" }
 
         val siteId = matchedCampaign?.campaignTag ?: "GLOBAL"
         val newCampaignId = matchedCampaign?.id

@@ -82,22 +82,27 @@ class HeartbeatServer @Inject constructor(
         // Discovery Broadcast: Advertise ALL active Site IDs and their current owners
         scope.launch {
             while (isActive) {
-                try {
-                    val siteIds = campaignRepository.getActivationCodes()
-                    val allMetadata = signalMonitor.allSourceMetadata.first()
-                    
-                    val siteStatusList = siteIds.map { sid ->
-                        val owner = allMetadata[sid]?.hostname ?: "NONE"
-                        "$sid|$owner"
+                // ONLY broadcast if Local Monitoring is DISABLED
+                if (!campaignRepository.deviceManager.isLocalMonitoringEnabled()) {
+                    try {
+                        val siteIds = campaignRepository.getActivationCodes()
+                        val allMetadata = signalMonitor.allSourceMetadata.first()
+                        
+                        val siteStatusList = siteIds.map { sid ->
+                            val owner = allMetadata[sid]?.hostname ?: "NONE"
+                            "$sid|$owner"
+                        }
+                        
+                        val siteStatusCsv = if (siteStatusList.isEmpty()) "UNACTIVATED|NONE" else siteStatusList.joinToString(",")
+                        
+                        val discoveryMsg = "DOOH_TRACKER_ADVERT:${port}:${siteStatusCsv}".toByteArray()
+                        val broadcastAddr = InetAddress.getByName("255.255.255.255")
+                        val discoveryPacket = DatagramPacket(discoveryMsg, discoveryMsg.size, broadcastAddr, 50006)
+                        socket?.send(discoveryPacket)
+                    } catch (e: Exception) {
                     }
-                    
-                    val siteStatusCsv = if (siteStatusList.isEmpty()) "UNACTIVATED|NONE" else siteStatusList.joinToString(",")
-                    
-                    val discoveryMsg = "DOOH_TRACKER_ADVERT:${port}:${siteStatusCsv}".toByteArray()
-                    val broadcastAddr = InetAddress.getByName("255.255.255.255")
-                    val discoveryPacket = DatagramPacket(discoveryMsg, discoveryMsg.size, broadcastAddr, 50006)
-                    socket?.send(discoveryPacket)
-                } catch (e: Exception) {
+                } else {
+                    // In Local mode, we stay invisible to external monitors
                 }
                 delay(2000.milliseconds)
             }

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.doohtracker.box.data.manager.Identity
 import com.doohtracker.box.data.repository.CampaignRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -35,6 +36,23 @@ class ActivationViewModel @Inject constructor(
     private val _stagedIdentities = MutableStateFlow<List<Identity>>(emptyList())
     val stagedIdentities: StateFlow<List<Identity>> = _stagedIdentities.asStateFlow()
 
+    private val _isLocalMonitoringEnabled = MutableStateFlow(repository.deviceManager.isLocalMonitoringEnabled())
+    val isLocalMonitoringEnabled: StateFlow<Boolean> = _isLocalMonitoringEnabled.asStateFlow()
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val isNotificationAccessGranted: StateFlow<Boolean> = repository.deviceManager.isLocalMonitoringEnabledFlow
+        .flatMapLatest { enabled ->
+            if (enabled) {
+                repository.internalMediaMonitor.isPermissionGranted
+            } else {
+                flowOf(true)
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    fun checkInternalPermission() {
+        repository.internalMediaMonitor.checkPermission()
+    }
+
     init { refreshStagedIdentities() }
 
     fun onActivationCodeChange(code: String) {
@@ -47,6 +65,11 @@ class ActivationViewModel @Inject constructor(
 
     fun onInstallationNotesChange(notes: String) {
         _location.value = notes
+    }
+
+    fun onLocalMonitoringToggle(enabled: Boolean) {
+        _isLocalMonitoringEnabled.value = enabled
+        repository.deviceManager.setLocalMonitoringEnabled(enabled)
     }
 
     private fun refreshStagedIdentities() {

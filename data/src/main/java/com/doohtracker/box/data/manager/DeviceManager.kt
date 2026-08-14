@@ -32,9 +32,13 @@ class DeviceManager @Inject constructor(
     private val KEY_SOURCE_PREVIEW_ENABLED = "source_preview_enabled"
     private val KEY_AUTHORIZED_PORT = "authorized_monitoring_port"
     private val KEY_DARK_MODE_ENABLED = "dark_mode_enabled"
+    private val KEY_LOCAL_MONITORING_ENABLED = "local_monitoring_enabled"
 
     private val _isDarkModeEnabledFlow = MutableStateFlow(isDarkModeEnabled())
     val isDarkModeEnabledFlow: StateFlow<Boolean> = _isDarkModeEnabledFlow.asStateFlow()
+
+    private val _isLocalMonitoringEnabledFlow = MutableStateFlow(isLocalMonitoringEnabled())
+    val isLocalMonitoringEnabledFlow: StateFlow<Boolean> = _isLocalMonitoringEnabledFlow.asStateFlow()
 
     fun isActivated(): Boolean = getIdentities().isNotEmpty()
     
@@ -55,6 +59,13 @@ class DeviceManager @Inject constructor(
     fun setDarkModeEnabled(enabled: Boolean) {
         prefs.edit { putBoolean(KEY_DARK_MODE_ENABLED, enabled) }
         _isDarkModeEnabledFlow.value = enabled
+    }
+
+    fun isLocalMonitoringEnabled(): Boolean = prefs.getBoolean(KEY_LOCAL_MONITORING_ENABLED, false)
+
+    fun setLocalMonitoringEnabled(enabled: Boolean) {
+        prefs.edit { putBoolean(KEY_LOCAL_MONITORING_ENABLED, enabled) }
+        _isLocalMonitoringEnabledFlow.value = enabled
     }
 
     fun getIdentities(): List<Identity> {
