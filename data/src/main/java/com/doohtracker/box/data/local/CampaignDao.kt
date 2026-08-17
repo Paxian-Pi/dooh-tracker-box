@@ -14,6 +14,9 @@ interface CampaignDao {
     @Query("SELECT * FROM campaigns WHERE startTime <= :currentTime AND endTime >= :currentTime")
     fun getActiveCampaigns(currentTime: Long): Flow<List<CampaignEntity>>
 
+    @Query("UPDATE campaigns SET localPath = NULL WHERE id = :campaignId")
+    suspend fun clearLocalPath(campaignId: String)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCampaigns(campaigns: List<CampaignEntity>)
 

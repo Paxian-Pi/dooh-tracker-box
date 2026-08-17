@@ -156,7 +156,7 @@ fun ActivationScreen(viewModel: ActivationViewModel, clearHub: DashboardViewMode
                     shape = ClickableSurfaceDefaults.shape(MaterialTheme.shapes.small),
                     colors = ClickableSurfaceDefaults.colors(
                         containerColor = Color.Transparent,
-                        focusedContainerColor = Color.White.copy(alpha = 0.05f)
+                        focusedContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
                     ),
                     border = ClickableSurfaceDefaults.border(
                         focusedBorder = Border(
@@ -168,7 +168,9 @@ fun ActivationScreen(viewModel: ActivationViewModel, clearHub: DashboardViewMode
                             shape = MaterialTheme.shapes.small
                         )
                     ),
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
                 ) {
                     Row(
                         modifier = Modifier.padding(12.dp),
@@ -179,12 +181,12 @@ fun ActivationScreen(viewModel: ActivationViewModel, clearHub: DashboardViewMode
                             Text(
                                 text = "Monitor Internal Android Player",
                                 style = MaterialTheme.typography.labelLarge,
-                                color = if (isLocalMonitorEnabled && !isNotificationAccessGranted) StatusRed else Color.White
+                                color = if (isLocalMonitorEnabled && !isNotificationAccessGranted) StatusRed else MaterialTheme.colorScheme.onSurface
                             )
                             Text(
                                 text = "For players running on this same box. Suppresses external network discovery.",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color.Gray
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         Switch(
@@ -211,11 +213,19 @@ fun ActivationScreen(viewModel: ActivationViewModel, clearHub: DashboardViewMode
                                 shape = MaterialTheme.shapes.extraSmall
                             )
                         ),
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp).height(45.dp).clickable {
-                            context.startActivity(android.content.Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
-                        }
+                        modifier = Modifier
+                            .fillMaxWidth()
+//                            .padding(top = 4.dp)
+//                            .height(45.dp)
+                            .clickable {
+                                context.startActivity(android.content.Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
+                            }
                     ) {
-                        Text("Grant Notification Access", style = MaterialTheme.typography.labelSmall)
+                        Text(
+                            "Grant Notification Access",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 

@@ -2,6 +2,7 @@ package com.doohtracker.box.tracker.player
 
 import android.content.Context
 import android.util.Log
+import java.io.EOFException
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.*
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.roundToLong
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 @androidx.media3.common.util.UnstableApi
@@ -41,9 +43,12 @@ class PlaybackManager @Inject constructor(
     private val _mismatchedTitle = MutableStateFlow<String?>(null)
     val mismatchedTitle = _mismatchedTitle.asStateFlow()
 
+    private val _isPreviewActive = MutableStateFlow(false)
+    val isPreviewActive = _isPreviewActive.asStateFlow()
+
     private var isPlaying = false
     private var imageTimerJob: Job? = null
-    
+
     init {
         try {
             val renderersFactory = DefaultRenderersFactory(context)
@@ -52,7 +57,7 @@ class PlaybackManager @Inject constructor(
             val httpDataSourceFactory = DefaultHttpDataSource.Factory()
                 .setUserAgent("DOOHTracker/1.0")
                 .setAllowCrossProtocolRedirects(true)
-            
+
             val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
 
             _player = ExoPlayer.Builder(context, renderersFactory)
@@ -71,6 +76,48 @@ class PlaybackManager @Inject constructor(
 
                         override fun onPlayerError(error: PlaybackException) {
                             Log.e("Playback", "ExoPlayer Error: ${error.message} (Code: ${error.errorCode})", error)
+
+                            val cause = error.cause
+                            val isGenericIoError = error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED
+                            val isEof = cause is EOFException || cause?.message?.contains("EOF", ignoreCase = true) == true
+
+                            if (isGenericIoError || isEof) {
+                                _currentCampaign.value?.let { campaign ->
+                                    val path = campaign.localPath
+                                    if (path != null) {
+                                        Log.w("Playback", "IO/EOF Error detected while playing local file! Marking as corrupted: $path")
+                                        playerScope.launch {
+                                            try {
+                                                withContext(Dispatchers.IO) {
+                                                    val file = java.io.File(path)
+                                                    if (file.exists()) {
+                                                        Log.d("Playback", "Deleting corrupted file: $path")
+                                                        file.delete()
+                                                    }
+                                                }
+                                                Log.d("Playback", "Clearing local path for campaign ${campaign.id} in DB")
+                                                campaignRepository.clearLocalPath(campaign.id)
+
+                                                // Trigger re-download immediately
+                                                campaignRepository.syncCampaigns()
+
+                                                // Stop player to prevent repeated errors and allow monitor to retry
+                                                stopPlayback()
+
+                                            } catch (e: Exception) {
+                                                Log.e("Playback", "Failed to handle corrupted media recovery", e)
+                                                stopPlayback()
+                                            }
+                                        }
+                                    } else {
+                                        Log.e("Playback", "IO Error occurred while playing from URL. No local file to clear. Stopping playback.")
+                                        stopPlayback()
+                                    }
+                                }
+                            } else {
+                                // For other errors, still stop playback to avoid stuck state
+                                stopPlayback()
+                            }
                         }
 
                         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -81,34 +128,39 @@ class PlaybackManager @Inject constructor(
         } catch (e: Exception) {
             Log.e("Playback", "ExoPlayer Init Error", e)
         }
-        
+
         startLiveMirrorMonitor()
     }
 
     private fun startLiveMirrorMonitor() {
         playerScope.launch {
-            // Observe all billboard pulses AND the hub's aggregate syncing state
+            // Observe pulses with a 3-second "Sustain" to prevent flickering
             combine(
                 gatekeeper.signalMonitor.allSourceMetadata,
-                campaignRepository.isHubSyncing
-            ) { allMetadata, isHubSyncing ->
+                campaignRepository.isHubSyncing,
+                _isPreviewActive
+            ) { allMetadata, isHubSyncing, isPreviewActive ->
+                // Bundle state for stable consumption
+                Triple(allMetadata, isHubSyncing, isPreviewActive)
+            }.collectLatest { (allMetadata, isHubSyncing, isPreviewActive) ->
+                if (isPreviewActive) return@collectLatest
+
                 if (isHubSyncing) {
-                    Log.d("Playback", "Hub is downloading references. Inhibiting mirror playback.")
                     stopPlayback()
-                    return@combine
+                    return@collectLatest
                 }
 
-                // Pickup the most recently active pulse
                 val metadata = allMetadata.values.maxByOrNull { it.lastSeen }
                 val reportedTitle = metadata?.mediaTitle?.lowercase() ?: "none"
                 
                 if (reportedTitle == "none") {
                     _mismatchedTitle.value = null
-                    stopPlayback()
-                    return@combine
+                    // Wait 3 seconds before stopping to handle transient gaps
+                    delay(3000.milliseconds)
+                    if (!_isPreviewActive.value) stopPlayback()
+                    return@collectLatest
                 }
 
-                // Find a match in our system across all clients (STRICT COMPLIANCE: Active Only)
                 val currentTime = timeProvider.getCurrentTimeMillis()
                 val allCampaigns = campaignRepository.allCampaigns.first()
                 val matchedCampaign = allCampaigns.filter { 
@@ -121,16 +173,14 @@ class PlaybackManager @Inject constructor(
                 }
 
                 if (matchedCampaign != null) {
-                    // Check if the matched campaign itself has a local file
                     if (matchedCampaign.localPath == null) {
-                        Log.d("Playback", "Match found for ${matchedCampaign.name} but media not yet downloaded. Waiting...")
+                        delay(2000) // Wait briefly for sync to finish
                         stopPlayback()
-                        return@combine
+                        return@collectLatest
                     }
 
                     _mismatchedTitle.value = null
                     if (_currentCampaign.value?.id != matchedCampaign.id) {
-                        Log.d("Playback", "Billboard Title Changed -> ${matchedCampaign.name}. Mirroring...")
                         playCampaign(matchedCampaign)
                     }
                 } else {
@@ -138,8 +188,9 @@ class PlaybackManager @Inject constructor(
                     Log.d("Playback", "Billboard playing unrecognized content: $reportedTitle.")
                     stopPlayback()
                     _mismatchedTitle.value = metadata?.mediaTitle ?: "Unknown File"
+                    stopPlayback()
                 }
-            }.collect()
+            }
         }
     }
 
@@ -177,39 +228,31 @@ class PlaybackManager @Inject constructor(
             Log.d("Playback", "Mirroring VIDEO: ${campaign.name}")
             _player?.let { p ->
                 try {
-                    Log.d("Playback", "Current player state before stop: ${getStateName(p.playbackState)}")
+                    val localPath = campaign.localPath
+                    if (localPath == null) {
+                        Log.e("Playback", "ERROR: localPath is null for ${campaign.name}")
+                        stopPlayback()
+                        return@let
+                    }
+
+                    val file = java.io.File(localPath)
+                    if (!file.exists() || file.length() == 0L) {
+                        Log.e("Playback", "ERROR: Local file for ${campaign.name} is missing or empty at $localPath")
+                        stopPlayback()
+                        return@let
+                    }
+
+                    Log.d("Playback", "ExoPlayer: Starting video playback: $localPath")
+                    val uri = android.net.Uri.fromFile(file)
+
                     p.stop()
                     p.clearMediaItems()
-                    
-                    val uri = campaign.localPath?.let { path ->
-                        val file = java.io.File(path)
-                        if (file.exists() && file.length() > 0) {
-                            Log.d("Playback", "Using local file: $path (size: ${file.length()} bytes)")
-                            android.net.Uri.fromFile(file)
-                        } else {
-                            Log.d("Playback", "Local file missing/empty: $path, falling back to URL")
-                            null
-                        }
-                    } ?: android.net.Uri.parse(campaign.mediaUrl)
-
-                    Log.d("Playback", "Preparing player for ${campaign.name} with URI: $uri")
-                    
-                    p.setMediaItem(MediaItem.Builder()
-                        .setUri(uri)
-                        .setMediaId(campaign.id)
-                        .build())
-                    
+                    p.setMediaItem(MediaItem.fromUri(uri))
                     p.repeatMode = Player.REPEAT_MODE_ALL
-                    Log.d("Playback", "Calling prepare...")
                     p.prepare()
-                    
-                    // Delay play() to ensure surface is ready
-                    playerScope.launch {
-                        delay(100)
-                        Log.d("Playback", "Calling play after surface ready delay...")
-                        p.play()
-                        Log.d("Playback", "Play called. Current state: ${getStateName(p.playbackState)}")
-                    }
+                    p.play()
+
+                    Log.d("Playback", "ExoPlayer: play() called for ${campaign.name}")
                 } catch (e: Exception) {
                     Log.e("Playback", "Failed to start video playback for ${campaign.name}", e)
                 }
@@ -221,5 +264,16 @@ class PlaybackManager @Inject constructor(
         _player?.release()
         _player = null
         playerScope.cancel()
+    }
+
+    fun previewCampaign(campaign: CampaignEntity) {
+        playerScope.launch {
+            _isPreviewActive.value = true
+            Log.d("Playback", "Starting manual 30s preview for: ${campaign.name}")
+            playCampaign(campaign)
+            delay(30000) // 30 seconds preview
+            _isPreviewActive.value = false
+            Log.d("Playback", "Manual preview finished. Returning to live mirror.")
+        }
     }
 }

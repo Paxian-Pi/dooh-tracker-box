@@ -12,5 +12,12 @@ data class IdentityUiModel(
     val downloadedCount: Int,
     val mediaTitle: String = "NONE",
     val isMismatched: Boolean = false,
-    val isDownloading: Boolean = false
+    val isDownloading: Boolean = false,
+    val campaigns: List<CampaignBrief> = emptyList()
+)
+
+data class CampaignBrief(
+    val id: String,
+    val name: String,
+    val isVerified: Boolean
 )

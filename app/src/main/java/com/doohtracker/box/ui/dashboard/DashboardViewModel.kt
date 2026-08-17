@@ -135,12 +135,12 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
             val identityCampaigns = allCampaigns.filter { it.campaignTag == siteId }
             val metadata = allMetadata[siteId]
             
-            // Strict Downloading Logic:
-            // 1. Only show "Downloading" if we have ZERO campaigns (Initial setup).
-            // 2. Once we have campaigns, even if we are updating, we show the ads.
-            // This prevents flickering during background updates.
-            val hasAds = identityCampaigns.isNotEmpty()
-            val isDownloading = !hasAds && isDownloadingHubWide
+            // 1. Independent Downloading Logic:
+            // A site is "Downloading" if it has active scheduled campaigns missing their local files.
+            val hasMissingActiveFiles = identityCampaigns.any { 
+                it.startTime <= currentTime && it.endTime >= currentTime && it.mediaUrl != null && it.localPath == null 
+            }
+            val isDownloading = hasMissingActiveFiles || (identityCampaigns.isEmpty() && isDownloadingHubWide)
             
             val reportedTitle = metadata?.mediaTitle?.lowercase() ?: ""
             val matchedCampaigns = identityCampaigns.filter { campaign ->
@@ -197,7 +197,10 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
                 downloadedCount = identityCampaigns.size,
                 mediaTitle = metadata?.mediaTitle ?: "NONE",
                 isMismatched = status == "Content Mismatch",
-                isDownloading = isDownloading
+                isDownloading = isDownloading,
+                campaigns = identityCampaigns.map { 
+                    CampaignBrief(it.id, it.name, it.localPath != null) 
+                }
             )
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -210,8 +213,6 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
         // Hub is syncing if ANY identity is in initial setup (zero ads)
         // OR if the repository reports missing files for ACTIVE scheduled campaigns
         identityList.any { it.isDownloading } || repoSyncing
-    }.debounce { syncing -> 
-        if (syncing) 500L else 3000L // Heavy buffer: wait 3s before declaring "Sync Done" to prevent flickering
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private val _isSourcePreviewEnabled = MutableStateFlow(campaignRepository.isSourcePreviewEnabled())
@@ -306,6 +307,18 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     fun toggleSourcePreview(enabled: Boolean) {
         campaignRepository.setSourcePreviewEnabled(enabled)
         _isSourcePreviewEnabled.value = enabled
+    }
+
+    val isMirrorPreviewActive: StateFlow<Boolean> = playbackManager.isPreviewActive
+
+    @OptIn(UnstableApi::class)
+    fun previewCampaign(campaignId: String) {
+        viewModelScope.launch {
+            val campaign = campaignRepository.allCampaigns.first().find { it.id == campaignId }
+            if (campaign != null) {
+                playbackManager.previewCampaign(campaign)
+            }
+        }
     }
 
     val isDarkModeEnabled: StateFlow<Boolean> = campaignRepository.isDarkModeEnabled

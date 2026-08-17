@@ -47,6 +47,9 @@ class CampaignRepository @Inject constructor(
     private val _isDownloadingFiles = MutableStateFlow(false)
     val isDownloadingFiles: StateFlow<Boolean> = _isDownloadingFiles.asStateFlow()
 
+    private val _downloadErrors = MutableStateFlow<Map<String, String>>(emptyMap()) // campaignId -> error message
+    val downloadErrors: StateFlow<Map<String, String>> = _downloadErrors.asStateFlow()
+
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     val isHubSyncing: Flow<Boolean> = allCampaigns.map { campaigns ->
         val now = timeProvider.getCurrentTimeMillis()
@@ -127,13 +130,19 @@ class CampaignRepository @Inject constructor(
                 deviceManager.updateLastSyncTime(timeProvider.getCurrentTimeMillis())
                 val mediaResults = mediaResponse.body()?.results ?: emptyList()
                 val identities = deviceManager.getIdentities()
+                val now = timeProvider.getCurrentTimeMillis()
 
                 identities.forEach { identity ->
-                    val matchedResults = mediaResults.filter { it.campaignTag == identity.siteId && it.user == identity.username }
+                    // 1. Filter: Strictly affiliated AND within open window
+                    val matchedResults = mediaResults.filter { dto ->
+                        dto.campaignTag == identity.siteId && 
+                        dto.user == identity.username &&
+                        dto.toEntity().let { it.startTime <= now && it.endTime >= now }
+                    }
+
                     if (matchedResults.isNotEmpty()) {
                         val existingCampaigns = campaignDao.getAllCampaigns().first()
                         
-                        // 1. Prepare and insert placeholders immediately so UI shows "Downloading"
                         val identityEntities = matchedResults.map { dto ->
                             val entity = dto.toEntity().normalizeUrl()
                             val existing = existingCampaigns.find { it.id == entity.id }
@@ -152,17 +161,40 @@ class CampaignRepository @Inject constructor(
                         }
                         campaignDao.insertCampaigns(identityEntities)
 
-                        // 2. Download files one-by-one and update DB in real-time
+                        // 2. Download using URL filename
                         identityEntities.forEach { entity ->
                             if (entity.mediaUrl != null && entity.localPath == null) {
-                                // Only set downloading flag if we actually have work to do
                                 if (!_isDownloadingFiles.value) {
                                     _isDownloadingFiles.value = true
                                 }
-                                val file = mediaDownloader.downloadMedia(entity.mediaUrl, entity.id)
-                                if (file != null) {
-                                    // Update this specific campaign as "Done" immediately
+                                
+                                // Extract filename from URL (e.g. DJ___DOOH___TBS_Tower.mp4)
+                                val urlFilename = entity.mediaUrl.substringAfterLast("/").substringBefore("?")
+                                Log.d("Sync", "Downloading media for campaign '${entity.name}' from: ${entity.mediaUrl}")
+                                
+                                val file = mediaDownloader.downloadMedia(entity.mediaUrl, urlFilename)
+                                
+                                if (file != null && file.exists() && file.length() > 0) {
+                                    Log.d("Sync", "SUCCESS: File downloaded for '${entity.name}': ${file.absolutePath} (${file.length()} bytes)")
                                     campaignDao.insertCampaigns(listOf(entity.copy(localPath = file.absolutePath)))
+                                    
+                                    // Clear any previous error for this campaign
+                                    val updatedErrors = _downloadErrors.value.toMutableMap()
+                                    updatedErrors.remove(entity.id)
+                                    _downloadErrors.value = updatedErrors
+                                } else {
+                                    val errorMsg = when {
+                                        file == null -> "Downloader returned null"
+                                        !file.exists() -> "Downloaded file does not exist: ${file.absolutePath}"
+                                        file.length() == 0L -> "Downloaded file is empty (0 bytes): ${file.absolutePath}"
+                                        else -> "Unknown download error"
+                                    }
+                                    Log.e("Sync", "FAILED: Download failed for campaign '${entity.name}' ($errorMsg). URL: ${entity.mediaUrl}")
+                                    
+                                    // Track the error
+                                    val updatedErrors = _downloadErrors.value.toMutableMap()
+                                    updatedErrors[entity.id] = errorMsg
+                                    _downloadErrors.value = updatedErrors
                                 }
                             }
                         }
@@ -176,14 +208,25 @@ class CampaignRepository @Inject constructor(
                 set(Calendar.SECOND, 0)
                 set(Calendar.MILLISECOND, 0)
             }.timeInMillis
-            // Keep campaigns that ended today for reporting purposes
             campaignDao.deleteExpiredCampaigns(startOfToday)
         } catch (e: Exception) {
-            Log.e("Sync", "Error during synchronization", e)
+            Log.e("Sync", "FATAL: Error during synchronization - ${e.message}", e)
         } finally {
             _isSyncing.value = false
             _isDownloadingFiles.value = false
         }
+    }
+
+    fun clearDownloadError(campaignId: String) {
+        val updatedErrors = _downloadErrors.value.toMutableMap()
+        updatedErrors.remove(campaignId)
+        _downloadErrors.value = updatedErrors
+        Log.d("Sync", "Cleared download error for campaign: $campaignId")
+    }
+
+    fun clearAllDownloadErrors() {
+        _downloadErrors.value = emptyMap()
+        Log.d("Sync", "Cleared all download errors")
     }
 
     private fun CampaignEntity.normalizeUrl(): CampaignEntity {
@@ -454,6 +497,10 @@ class CampaignRepository @Inject constructor(
         }
         val oneDayAgo = System.currentTimeMillis() - (24 * 60 * 60 * 1000)
         trackingLogDao.deleteOldSyncedLogs(oneDayAgo)
+    }
+
+    suspend fun clearLocalPath(campaignId: String) {
+        campaignDao.clearLocalPath(campaignId)
     }
 
     suspend fun clearData() {

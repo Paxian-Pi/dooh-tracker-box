@@ -3,6 +3,7 @@ package com.doohtracker.box.ui.dashboard
 import android.content.Context
 import android.content.res.Configuration.UI_MODE_TYPE_MASK
 import android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
+import android.view.ViewGroup
 import android.widget.Toast
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.LinearEasing
@@ -39,7 +40,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.tv.material3.Button as TvButton
 import androidx.tv.material3.ButtonDefaults as TvButtonDefaults
@@ -87,6 +91,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
     val siteId by viewModel.activationCode.collectAsState()
     val isHubSyncing by viewModel.isHubSyncing.collectAsState()
     val isDarkMode by viewModel.isDarkModeEnabled.collectAsState()
+    val isMirrorPreviewActive by viewModel.isMirrorPreviewActive.collectAsState()
 
     var showExportDialog by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
@@ -300,7 +305,9 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             verticalArrangement = Arrangement.spacedBy(4.dp) // Reduced internal spacing
                         ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 5.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -321,7 +328,9 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                             shape = MaterialTheme.shapes.small
                                         )
                                     ),
-                                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 8.dp)
                                 ) {
                                     Text(
                                         modifier = Modifier.padding(8.dp),
@@ -337,21 +346,21 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                         containerColor = Color.Transparent,
                                         contentColor = StatusRed,
                                         focusedContainerColor = StatusRed.copy(alpha = 0.1f),
-                                    focusedContentColor = StatusRed
-                                ),
-                                border = TvButtonDefaults.border(
-                                    focusedBorder = Border(
-                                        border = BorderStroke(1.dp, StatusCyan),
-                                        shape = MaterialTheme.shapes.extraSmall
+                                        focusedContentColor = StatusRed
                                     ),
-                                    pressedBorder = Border(
-                                        border = BorderStroke(1.dp, StatusCyan),
-                                        shape = MaterialTheme.shapes.extraSmall
-                                    )
-                                ),
-                                modifier = Modifier
-                                    .scale(0.8f)
-                                    .clickable { viewModel.clearData() }
+                                    border = TvButtonDefaults.border(
+                                        focusedBorder = Border(
+                                            border = BorderStroke(1.dp, StatusCyan),
+                                            shape = MaterialTheme.shapes.extraSmall
+                                        ),
+                                        pressedBorder = Border(
+                                            border = BorderStroke(1.dp, StatusCyan),
+                                            shape = MaterialTheme.shapes.extraSmall
+                                        )
+                                    ),
+                                    modifier = Modifier
+                                        .scale(0.8f)
+                                        .clickable { viewModel.clearData() }
                                 ) {
                                     Text("Clear Hub")
                                 }
@@ -487,20 +496,35 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                         val campaign = currentMediaCampaign
 
                         val mediaType = when {
-                            isHubSyncing || !isSourcePreviewEnabled -> "reference"
+                            isMirrorPreviewActive -> {
+                                // Forced Preview Mode
+                                val url = campaign?.mediaUrl?.lowercase() ?: ""
+                                if (campaign?.mediaType?.lowercase() == "image" ||
+                                    url.endsWith(".jpg") || url.endsWith(".jpeg") ||
+                                    url.endsWith(".png") || url.endsWith(".webp")
+                                ) "image" else "video"
+                            }
+
+                            // 4. Remain visible if syncing OR if "No Media" / "Ready" (Idle)
+                            isHubSyncing || !isSourcePreviewEnabled || 
+                            sourceMonitorStatus == "No Media" || sourceMonitorStatus == "Ready" || 
+                            sourceMonitorStatus.contains("Idle") -> "reference"
+
                             mismatchedTitle != null -> "mismatch"
                             campaign != null && campaign.localPath != null -> {
                                 val url = campaign.mediaUrl?.lowercase() ?: ""
                                 if (campaign.mediaType?.lowercase() == "image" ||
                                     url.endsWith(".jpg") || url.endsWith(".jpeg") ||
-                                    url.endsWith(".png") || url.endsWith(".webp")) "image" else "video"
+                                    url.endsWith(".png") || url.endsWith(".webp")
+                                ) "image" else "video"
                             }
+
                             isSourceLinked -> "mirror"
                             else -> "none"
                         }
 
-                        Crossfade(targetState = mediaType, label = "MediaSwitch", modifier = Modifier.fillMaxSize()) { type ->
-                            when (type) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            when (mediaType) {
                                 "reference" -> {
                                     Box(
                                         modifier = Modifier
@@ -524,16 +548,20 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                                     horizontalArrangement = Arrangement.SpaceBetween
                                                 ) {
                                                     Text(
-                                                        identity.siteId,
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = Color.White
-                                                    )
-                                                    Text(
-                                                        if (identity.isDownloading) "Downloading..." else "Done",
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = if (identity.isDownloading) StatusYellow else StatusGreen,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
+                                                    identity.siteId,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = Color.White
+                                                )
+                                                
+                                                // 3. Per-Identity Sync Status
+                                                val statusText = if (identity.isDownloading) "Downloading..." else "Done"
+                                                
+                                                Text(
+                                                    text = statusText,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = if (statusText == "Done") StatusGreen else StatusYellow,
+                                                    fontWeight = FontWeight.Bold
+                                                )
                                                 }
                                             }
                                         }
@@ -594,21 +622,29 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                             PlayerView(ctx).apply {
                                                 player = playbackManager.player
                                                 useController = false
+                                                controllerAutoShow = false
                                                 @Suppress("DEPRECATION")
                                                 useArtwork = false
+                                                setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
                                                 setShutterBackgroundColor(android.graphics.Color.BLACK)
                                                 setBackgroundColor(android.graphics.Color.BLACK)
                                                 setKeepContentOnPlayerReset(true)
-                                                keepScreenOn = true
+                                                
+                                                layoutParams = ViewGroup.LayoutParams(
+                                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                                )
                                             }
                                         },
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(Color.Black),
+                                        modifier = Modifier.fillMaxSize(),
                                         update = { view ->
-                                            view.player = playbackManager.player
+                                            if (view.player != playbackManager.player) {
+                                                view.player = playbackManager.player
+                                            }
                                         },
-                                        onRelease = { view -> view.player = null }
+                                        onRelease = { view ->
+                                            view.player = null
+                                        }
                                     )
                                 }
 
@@ -683,12 +719,14 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
             if (identity != null) {
                 AllAdsDialog(
                     identity = identity,
-                    onDismiss = { adsSiteIdToShow = null }
+                    onDismiss = { adsSiteIdToShow = null },
+                    viewModel = viewModel
                 )
             }
         }
     }
 }
+
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -727,7 +765,7 @@ fun IdentityHubCard(identity: IdentityUiModel, onRemove: (String) -> Unit, onIns
                 Text(
                     text = identity.siteId,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = if(isDarkMode) Color.White else Color.Black.copy(alpha = 0.6f),
+                    color = if (isDarkMode) Color.White else Color.Black.copy(alpha = 0.6f),
                     fontWeight = FontWeight.Bold
                 )
                 Text(text = "User: ${identity.username}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
@@ -1332,7 +1370,9 @@ fun ExportDialog(viewModel: DashboardViewModel, onDismiss: () -> Unit, focusRequ
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun AllAdsDialog(identity: IdentityUiModel, onDismiss: () -> Unit) {
+fun AllAdsDialog(identity: IdentityUiModel, onDismiss: () -> Unit, viewModel: DashboardViewModel) {
+    val isMirrorPreviewActive by viewModel.isMirrorPreviewActive.collectAsState()
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1359,13 +1399,7 @@ fun AllAdsDialog(identity: IdentityUiModel, onDismiss: () -> Unit) {
                     fontWeight = FontWeight.Bold
                 )
 
-                val ads = remember(identity.allDownloadedAds) {
-                    identity.allDownloadedAds.split("|")
-                        .map { it.trim() }
-                        .filter { it.isNotEmpty() && it != "Waiting for source monitor" }
-                }
-
-                if (ads.isEmpty()) {
+                if (identity.campaigns.isEmpty()) {
                     Text("No campaigns found for this site.", color = Color.Gray, modifier = Modifier.padding(vertical = 10.dp))
                 } else {
                     Column(
@@ -1374,19 +1408,65 @@ fun AllAdsDialog(identity: IdentityUiModel, onDismiss: () -> Unit) {
                             .padding(horizontal = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        ads.forEach { ad ->
-                            Row(verticalAlignment = Alignment.Top) {
-                                Text(
-                                    "• ",
-                                    color = StatusCyan,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = ad,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Color.White
-                                )
+                        identity.campaigns.forEach { brief ->
+                            Surface(
+                                onClick = { if (brief.isVerified) viewModel.previewCampaign(brief.id) },
+                                shape = ClickableSurfaceDefaults.shape(MaterialTheme.shapes.small),
+                                colors = ClickableSurfaceDefaults.colors(
+                                    containerColor = Color.White.copy(alpha = 0.05f),
+                                    focusedContainerColor = Color.White.copy(alpha = 0.15f)
+                                ),
+                                border = ClickableSurfaceDefaults.border(
+                                    focusedBorder = Border(
+                                        border = BorderStroke(1.dp, StatusCyan),
+                                        shape = MaterialTheme.shapes.small
+                                    ),
+                                    pressedBorder = Border(
+                                        border = BorderStroke(1.dp, StatusCyan),
+                                        shape = MaterialTheme.shapes.small
+                                    )
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .alpha(if (brief.isVerified) 1f else 0.5f)
+                                    .clickable { if (brief.isVerified) viewModel.previewCampaign(brief.id) }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            "• ",
+                                            color = if (brief.isVerified) StatusCyan else Color.Gray,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = brief.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    if (brief.isVerified) {
+                                        Text(
+                                            text = if (isMirrorPreviewActive && viewModel.playbackManager.currentCampaign.collectAsState().value?.id == brief.id) "Previewing..." else "TAP TO PREVIEW",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = StatusGreen,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "PENDING...",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

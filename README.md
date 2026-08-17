@@ -31,7 +31,12 @@ The project follows a robust **Multi-Module Clean Architecture** pattern to ensu
 *   **Manual IP Override**: Supports direct connection to specific tracker IPs for restricted network environments, with strict **Same-Network Validation** to ensure the device is on the same local connection (WiFi/Ethernet).
 *   **Zero-Persistence Resets**: Starting with just an ID flag automatically clears manual overrides, ensuring Auto-Discovery remains the default reliable flow.
 
-### 4. Smart Location & System Health
+### 4. Hybrid Media Monitoring 🔄
+*   **External Mode**: Tracks campaigns from a networked source machine (Windows/Mac) via UDP pulses.
+*   **Internal Mode**: Tracks campaigns from a media player running on the **same Android device** using OS-level `MediaSession` metadata scraping.
+*   **Stealth Activation**: When Internal Mode is enabled, the tracker suppresses all network discovery broadcasts to stay invisible and secure.
+
+### 5. Smart Location & System Health
 *   **Triple-Layer Location**: GPS/WiFi, IP-Fallback, and Manual Metadata overwrite.
 *   **System Health Dashboard**: Real-time display of RAM usage, Storage % (Used/Total), and System Uptime.
 
