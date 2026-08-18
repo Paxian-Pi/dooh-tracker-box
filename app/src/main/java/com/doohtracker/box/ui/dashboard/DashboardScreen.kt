@@ -511,12 +511,17 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                             sourceMonitorStatus.contains("Idle") -> "reference"
 
                             mismatchedTitle != null -> "mismatch"
-                            campaign != null && campaign.localPath != null -> {
+                            campaign != null -> {
                                 val url = campaign.mediaUrl?.lowercase() ?: ""
-                                if (campaign.mediaType?.lowercase() == "image" ||
-                                    url.endsWith(".jpg") || url.endsWith(".jpeg") ||
-                                    url.endsWith(".png") || url.endsWith(".webp")
-                                ) "image" else "video"
+                                val isVideo = campaign.mediaType?.lowercase() == "video" || url.endsWith(".mp4")
+                                
+                                if (isVideo) {
+                                    "video"
+                                } else if (campaign.localPath != null) {
+                                    "image"
+                                } else {
+                                    "reference"
+                                }
                             }
 
                             isSourceLinked -> "mirror"

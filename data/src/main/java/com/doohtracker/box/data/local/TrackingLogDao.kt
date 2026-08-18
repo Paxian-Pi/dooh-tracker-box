@@ -6,7 +6,10 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface TrackingLogDao {
     @Insert
-    suspend fun insertLog(log: TrackingLogEntity)
+    suspend fun insertLog(log: TrackingLogEntity): Long
+
+    @Query("SELECT * FROM tracking_logs WHERE id = :id")
+    suspend fun getLogById(id: Int): TrackingLogEntity?
 
     @Query("SELECT * FROM tracking_logs WHERE isSynced = 0")
     suspend fun getUnsyncedLogs(): List<TrackingLogEntity>

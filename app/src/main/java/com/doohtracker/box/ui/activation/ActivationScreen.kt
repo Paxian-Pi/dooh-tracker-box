@@ -119,7 +119,7 @@ fun ActivationScreen(viewModel: ActivationViewModel, clearHub: DashboardViewMode
                     value = activationCode,
                     onValueChange = { viewModel.onActivationCodeChange(it) },
                     label = "Site Activation Code",
-                    placeholder = "e.g. #Retin-1234",
+                    placeholder = "e.g. 1234",
                     imeAction = ImeAction.Next
                 )
 

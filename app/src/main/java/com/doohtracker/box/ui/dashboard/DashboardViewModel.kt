@@ -316,6 +316,7 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
 
     val isMirrorPreviewActive: StateFlow<Boolean> = playbackManager.isPreviewActive
 
+    @androidx.annotation.OptIn(UnstableApi::class)
     @OptIn(UnstableApi::class)
     fun previewCampaign(campaignId: String) {
         viewModelScope.launch {

@@ -259,24 +259,25 @@ class CampaignRepository @Inject constructor(
         val reportedTitle = metadata.mediaTitle.lowercase()
         val allCampaignsNow = campaignDao.getAllCampaigns().first()
 
-        // 1. TARGETED MATCH (Active Only): Only match campaigns that belong to the reporting Site ID AND are within their active time window
-        val matchedCampaign = allCampaignsNow.filter { 
-            it.campaignTag.equals(metadata.siteId, ignoreCase = true) &&
-            it.startTime <= currentTime && it.endTime >= currentTime // STRICT COMPLIANCE: Window check
-        }.find { campaign ->
+        val reportingSiteId = metadata.siteId.uppercase()
+        val siteCampaigns = allCampaignsNow.filter { 
+            it.campaignTag.equals(reportingSiteId, ignoreCase = true) &&
+            it.startTime <= currentTime && it.endTime >= currentTime 
+        }
+
+        val matchedCampaign = siteCampaigns.find { campaign ->
             val fileName = campaign.sourceFilename?.lowercase() ?: ""
             val campaignName = campaign.name.lowercase()
             (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || reportedTitle.contains(campaignName)
         }?.takeIf { reportedTitle != "none" }
 
-        val siteId = matchedCampaign?.campaignTag ?: "GLOBAL"
         val newCampaignId = matchedCampaign?.id
-        val currentSession = activeSessions[siteId]
+        val currentSession = activeSessions[reportingSiteId]
 
         // 1b. RECOGNITION TRIGGER: If unrecognized title detected, attempt immediate sync to fetch new reference
         if (matchedCampaign == null && reportedTitle != "none" && reportedTitle != lastSyncAttemptedTitle) {
             lastSyncAttemptedTitle = reportedTitle
-            Log.d("Tracking", "Unrecognized title detected: $reportedTitle. Attempting immediate reference sync.")
+            Log.d("Tracking", "Unrecognized title detected on $reportingSiteId: $reportedTitle. Attempting immediate reference sync.")
             CoroutineScope(Dispatchers.IO).launch {
                 syncCampaigns()
             }
@@ -300,20 +301,35 @@ class CampaignRepository @Inject constructor(
                 val finishedCampaign = allCampaignsNow.find { it.id == currentSession.campaignId }
                 if (finishedCampaign != null) {
                     val durationSeconds = (currentTime - currentSession.startTime) / 1000L
-                    if (durationSeconds >= 2L) { 
-                        Log.d("Tracking", "Finalizing hub session for ${finishedCampaign.name}")
-                        sendTrackingPulse(finishedCampaign, currentTime, locationString, durationSeconds, true)
+                    if (durationSeconds >= 1L) { // report any visibility >= 1s
+                        Log.d("Tracking", "FINALIZING session for ${finishedCampaign.name} (${durationSeconds}s) on $reportingSiteId")
+                        
+                        // LOG AUDIT TRAIL IMMEDIATELY (Before network calls)
+                        val logId = trackingLogDao.insertLog(
+                            TrackingLogEntity(
+                                campaignId = finishedCampaign.id,
+                                timestamp = currentTime,
+                                isSynced = false // Will be updated if sync succeeds
+                            )
+                        )
+                        Log.d("Tracking", "Audit Trail: Log entry created with ID $logId")
+                        
+                        // SYNC TO CLOUD IMMEDIATELY
+                        sendTrackingPulse(finishedCampaign, currentTime, locationString, durationSeconds, logId.toInt(), true)
+                    } else {
+                        Log.d("Tracking", "Session for ${finishedCampaign.name} too short (${durationSeconds}s). Skipping log.")
                     }
                 }
             }
 
             // B. Start new session for this client
             if (newCampaignId != null) {
-                activeSessions[siteId] = PlaybackSession(newCampaignId, currentTime)
-                Log.d("Tracking", "Started hub session for ${matchedCampaign?.name} on site $siteId")
+                activeSessions[reportingSiteId] = PlaybackSession(newCampaignId, currentTime)
+                Log.d("Tracking", "STARTED new session for ${matchedCampaign?.name} on site $reportingSiteId")
                 campaignDao.updateLastSeenOnBillboardAt(newCampaignId, currentTime)
             } else {
-                activeSessions.remove(siteId)
+                Log.d("Tracking", "No active campaign matched for site $reportingSiteId. Media Title: $reportedTitle")
+                activeSessions.remove(reportingSiteId)
             }
         } else if (newCampaignId != null) {
             // C. Maintain current session
@@ -390,6 +406,7 @@ class CampaignRepository @Inject constructor(
         currentTime: Long,
         locationString: String,
         durationSeconds: Long,
+        localLogId: Int? = null,
         bypassContentCheck: Boolean = false
     ) {
         if (!bypassContentCheck) {
@@ -442,69 +459,67 @@ class CampaignRepository @Inject constructor(
         )
 
         try {
+            Log.d("Tracking", "Syncing Spot to Cloud for ${campaign.name}...")
             val popResponse = api.sendProofOfPlay(popRequest)
+            
+            // Fetch updated campaign to get new count for hourly sync
+            val latestAll = campaignDao.getAllCampaigns().first()
+            val updatedCampaign = latestAll.find { it.id == campaign.id } ?: campaign
+
             if (popResponse.isSuccessful) {
-                trackingLogDao.insertLog(TrackingLogEntity(campaignId = campaign.id, timestamp = currentTime, isSynced = true))
+                // Update Audit Trail state to Synced
+                localLogId?.let { id ->
+                    trackingLogDao.getLogById(id)?.let { log ->
+                        trackingLogDao.updateLog(log.copy(isSynced = true))
+                    }
+                }
                 campaignDao.incrementSyncedCount(campaign.id)
-                
-                // Fetch updated campaign to get new count for hourly sync
-                val updatedCampaign = campaignDao.getAllCampaigns().first().find { it.id == campaign.id } ?: campaign
-                
-                // 2. Send Hourly Track at the same time (syncs cumulative count)
-                val hourlyRequest = TrackHourlyRequest(
-                    user = updatedCampaign.user,
-                    campaign = updatedCampaign.campaign,
-                    campaignTag = updatedCampaign.campaignTag,
-                    hours = hourFormat.format(now),
-                    date = dateFormat.format(now),
-                    count = updatedCampaign.syncedCount,
-                    weekDay = weekDayNum,
-                    location = location,
-                    uniqueID = updatedCampaign.id
-                )
-                
-                api.trackHourly(hourlyRequest)
-                campaignDao.updateLastHourlyTrackedAt(updatedCampaign.id, currentTime)
+                Log.d("Tracking", "PoP SUCCESS for ${campaign.name}. Count: ${updatedCampaign.syncedCount + 1}")
             } else {
-                trackingLogDao.insertLog(TrackingLogEntity(campaignId = campaign.id, timestamp = currentTime, isSynced = false))
+                Log.e("Tracking", "PoP FAILED (HTTP ${popResponse.code()}) for ${campaign.name}")
             }
+
+            // ALWAYS attempt hourly sync to keep counts accurate even if PoP fails
+            val hourlyRequest = TrackHourlyRequest(
+                user = updatedCampaign.user,
+                campaign = updatedCampaign.campaign,
+                campaignTag = updatedCampaign.campaignTag,
+                hours = hourFormat.format(now),
+                date = dateFormat.format(now),
+                count = if (popResponse.isSuccessful) updatedCampaign.syncedCount + 1 else updatedCampaign.syncedCount,
+                weekDay = weekDayNum,
+                location = location,
+                uniqueID = updatedCampaign.id
+            )
+            
+            Log.d("Tracking", "Syncing Hourly Count to Cloud for ${campaign.name}...")
+            val hourlyResp = api.trackHourly(hourlyRequest)
+            if (hourlyResp.isSuccessful) {
+                campaignDao.updateLastHourlyTrackedAt(updatedCampaign.id, currentTime)
+                Log.d("Tracking", "Hourly Sync SUCCESS for ${campaign.name}")
+            } else {
+                Log.e("Tracking", "Hourly Sync FAILED (HTTP ${hourlyResp.code()}) for ${campaign.name}")
+            }
+
         } catch (e: Exception) {
-            Log.e("Tracking", "Tracking pulse failed for ${campaign.id}", e)
-            trackingLogDao.insertLog(TrackingLogEntity(campaignId = campaign.id, timestamp = currentTime, isSynced = false))
+            Log.e("Tracking", "Tracking sync FATAL for ${campaign.id}: ${e.message}")
         }
     }
 
     suspend fun syncPendingLogs() {
         val unsyncedLogs = trackingLogDao.getUnsyncedLogs()
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-        val dayFormat = SimpleDateFormat("EEEE", Locale.getDefault())
 
         unsyncedLogs.forEach { log ->
             val campaign = campaignDao.getAllCampaigns().first().find { it.id == log.campaignId }
             if (campaign != null) {
-                val date = Date(log.timestamp)
-                val request = SendProofOfPlayRequest(
-                    user = campaign.user,
-                    campaign = campaign.campaign,
-                    campaignTag = campaign.campaignTag,
-                    time = timeFormat.format(date),
-                    date = dateFormat.format(date),
-                    day = dayFormat.format(date),
-                    comment = "Delayed PoP sync",
-                    location = deviceManager.getInstallationNotes(),
-                    uniqueID = campaign.id,
-                    durationCount = 0, // Fallback
-                    confidence = 1.0f
+                sendTrackingPulse(
+                    campaign = campaign,
+                    currentTime = log.timestamp,
+                    locationString = deviceManager.getInstallationNotes(),
+                    durationSeconds = 0, // Fallback
+                    localLogId = log.id,
+                    bypassContentCheck = true
                 )
-
-                try {
-                    val response = api.sendProofOfPlay(request)
-                    if (response.isSuccessful) {
-                        trackingLogDao.updateLog(log.copy(isSynced = true))
-                        campaignDao.incrementSyncedCount(campaign.id)
-                    }
-                } catch (_: Exception) {}
             }
         }
         val oneDayAgo = System.currentTimeMillis() - (24 * 60 * 60 * 1000)
@@ -523,9 +538,10 @@ class CampaignRepository @Inject constructor(
     }
 
     suspend fun removeIdentity(siteId: String) {
+        val normalizedSid = siteId.uppercase()
         deviceManager.removeIdentity(siteId)
         // Immediately delete campaigns for this site from DB to stop tracking
         campaignDao.deleteCampaignsByTag(siteId)
-        activeSessions.remove(siteId)
+        activeSessions.remove(normalizedSid)
     }
 }

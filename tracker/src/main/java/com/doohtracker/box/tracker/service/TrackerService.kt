@@ -12,6 +12,7 @@ import com.doohtracker.box.data.logic.VerificationGatekeeper
 import com.doohtracker.box.data.repository.CampaignRepository
 import com.doohtracker.box.data.location.LocationMonitor
 import com.doohtracker.box.data.time.TimeProvider
+import com.doohtracker.box.data.hardware.SourceMetadata
 import com.doohtracker.box.tracker.player.PlaybackManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
@@ -52,15 +53,32 @@ class TrackerService : Service() {
     private fun observeTrackingLogic() {
         serviceScope.launch {
             // High-frequency Pulse Listener (Every 2 seconds via network)
+            var lastActiveSiteIds = emptySet<String>()
+
             gatekeeper.signalMonitor.allSourceMetadata.collect { allMetadata ->
+                val currentTime = timeProvider.getCurrentTimeMillis()
                 val location = locationMonitor.currentLocation.first()
                 val locationString = if (location != null) {
                     "${location.latitude}, ${location.longitude}"
                 } else ""
 
+                val currentSiteIds = allMetadata.keys
+                
+                // 1. Finalize sessions for sites that have DISAPPEARED from the network map
+                val missingSiteIds = lastActiveSiteIds - currentSiteIds
+                missingSiteIds.forEach { sid ->
+                    campaignRepository.processBillboardPulse(
+                        currentTime = currentTime,
+                        metadata = SourceMetadata(siteId = sid, mediaTitle = "none"),
+                        locationString = locationString
+                    )
+                }
+                lastActiveSiteIds = currentSiteIds
+
+                // 2. Process current pulses
                 allMetadata.values.forEach { metadata ->
                     campaignRepository.processBillboardPulse(
-                        currentTime = timeProvider.getCurrentTimeMillis(),
+                        currentTime = currentTime,
                         metadata = metadata,
                         locationString = locationString
                     )

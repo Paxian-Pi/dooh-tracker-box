@@ -15,7 +15,7 @@ class ActivationViewModel @Inject constructor(
     private val repository: CampaignRepository
 ) : ViewModel() {
 
-    private val _activationCode = MutableStateFlow("")
+    private val _activationCode = MutableStateFlow("#Retin-")
     val activationCode: StateFlow<String> = _activationCode.asStateFlow()
 
     private val _username = MutableStateFlow("")
@@ -56,7 +56,16 @@ class ActivationViewModel @Inject constructor(
     init { refreshStagedIdentities() }
 
     fun onActivationCodeChange(code: String) {
-        _activationCode.value = code
+        val prefix = "#Retin-"
+        if (!code.startsWith(prefix)) {
+            _activationCode.value = prefix
+            return
+        }
+
+        val suffix = code.substring(prefix.length)
+        if (suffix.length <= 4) {
+            _activationCode.value = code
+        }
     }
 
     fun onUsernameChange(name: String) {
@@ -82,7 +91,8 @@ class ActivationViewModel @Inject constructor(
     }
 
     fun validateAndAddIdentity() {
-        if (_activationCode.value.isBlank() || _username.value.isBlank()) {
+        val prefix = "#Retin-"
+        if (_activationCode.value == prefix || _username.value.isBlank()) {
             _errorMessage.value = "Site ID and Username are required"
             return
         }
@@ -101,7 +111,7 @@ class ActivationViewModel @Inject constructor(
 
             if (result.isSuccess) {
                 refreshStagedIdentities()
-                _activationCode.value = ""
+                _activationCode.value = "#Retin-"
                 _username.value = ""
                 _errorMessage.value = null
             } else {

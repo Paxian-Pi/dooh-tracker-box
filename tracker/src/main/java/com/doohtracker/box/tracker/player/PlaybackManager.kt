@@ -173,8 +173,13 @@ class PlaybackManager @Inject constructor(
                 }
 
                 if (matchedCampaign != null) {
-                    if (matchedCampaign.localPath == null) {
-                        delay(2000) // Wait briefly for sync to finish
+                    val url = matchedCampaign.mediaUrl?.lowercase() ?: ""
+                    val isVideo = matchedCampaign.mediaType?.lowercase() == "video" || url.endsWith(".mp4")
+
+                    // VIDEOS: Don't require localPath anymore (Title verification only)
+                    // IMAGES: Still require localPath for visual mirroring
+                    if (!isVideo && matchedCampaign.localPath == null) {
+                        delay(2000.milliseconds) // Wait briefly for sync to finish
                         stopPlayback()
                         return@collectLatest
                     }
