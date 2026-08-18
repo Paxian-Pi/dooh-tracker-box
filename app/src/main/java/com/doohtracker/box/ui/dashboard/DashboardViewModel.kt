@@ -136,9 +136,11 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
             val metadata = allMetadata[siteId]
             
             // 1. Independent Downloading Logic:
-            // A site is "Downloading" if it has active scheduled campaigns missing their local files.
+            // A site is "Downloading" if it has active scheduled campaigns (EXCLUDING videos) missing their local files.
             val hasMissingActiveFiles = identityCampaigns.any { 
-                it.startTime <= currentTime && it.endTime >= currentTime && it.mediaUrl != null && it.localPath == null 
+                val url = it.mediaUrl?.lowercase() ?: ""
+                val isVideo = it.mediaType?.lowercase() == "video" || url.endsWith(".mp4")
+                !isVideo && it.startTime <= currentTime && it.endTime >= currentTime && it.mediaUrl != null && it.localPath == null 
             }
             val isDownloading = hasMissingActiveFiles || (identityCampaigns.isEmpty() && isDownloadingHubWide)
             
@@ -199,7 +201,10 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
                 isMismatched = status == "Content Mismatch",
                 isDownloading = isDownloading,
                 campaigns = identityCampaigns.map { 
-                    CampaignBrief(it.id, it.name, it.localPath != null) 
+                    val url = it.mediaUrl?.lowercase() ?: ""
+                    val isVideo = it.mediaType?.lowercase() == "video" || url.endsWith(".mp4")
+                    // A campaign is "Verified/Ready" if it's a video OR if it has a local path
+                    CampaignBrief(it.id, it.name, isVideo || it.localPath != null)
                 }
             )
         }

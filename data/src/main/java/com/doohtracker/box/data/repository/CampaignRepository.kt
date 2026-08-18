@@ -54,7 +54,10 @@ class CampaignRepository @Inject constructor(
     val isHubSyncing: Flow<Boolean> = allCampaigns.map { campaigns ->
         val now = timeProvider.getCurrentTimeMillis()
         val hasMissingActiveFiles = campaigns.any { 
-            it.startTime <= now && it.endTime >= now && it.mediaUrl != null && it.localPath == null 
+            val url = it.mediaUrl?.lowercase() ?: ""
+            val isVideo = it.mediaType?.lowercase() == "video" || url.endsWith(".mp4")
+            // A file is only "missing" if it's NOT a video AND has no local path
+            !isVideo && it.startTime <= now && it.endTime >= now && it.mediaUrl != null && it.localPath == null
         }
         val hasNoCampaigns = campaigns.isEmpty() && deviceManager.isActivated()
         
@@ -164,6 +167,15 @@ class CampaignRepository @Inject constructor(
                         // 2. Download using URL filename
                         identityEntities.forEach { entity ->
                             if (entity.mediaUrl != null && entity.localPath == null) {
+                                // SKIP VIDEO DOWNLOADS: We only verify titles for videos now.
+                                val url = entity.mediaUrl.lowercase()
+                                val isVideo = entity.mediaType?.lowercase() == "video" || url.endsWith(".mp4")
+                                
+                                if (isVideo) {
+                                    Log.d("Sync", "Skipping video download for '${entity.name}': Verified via Title Only.")
+                                    return@forEach
+                                }
+
                                 if (!_isDownloadingFiles.value) {
                                     _isDownloadingFiles.value = true
                                 }

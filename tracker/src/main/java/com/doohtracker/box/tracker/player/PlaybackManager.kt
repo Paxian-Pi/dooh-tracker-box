@@ -225,7 +225,7 @@ class PlaybackManager @Inject constructor(
             _player?.stop()
             _player?.clearMediaItems()
         } else {
-            Log.d("Playback", "Mirroring VIDEO: ${campaign.name}")
+            /*Log.d("Playback", "Mirroring VIDEO: ${campaign.name}")
             _player?.let { p ->
                 try {
                     val localPath = campaign.localPath
@@ -256,7 +256,11 @@ class PlaybackManager @Inject constructor(
                 } catch (e: Exception) {
                     Log.e("Playback", "Failed to start video playback for ${campaign.name}", e)
                 }
-            }
+            }*/
+
+            Log.d("Playback", "Mirroring VIDEO (Title Verification): ${campaign.name}")
+            _player?.stop()
+            _player?.clearMediaItems()
         }
     }
 

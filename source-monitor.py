@@ -53,8 +53,11 @@ LOG_FILE = os.path.join(DATA_DIR, "monitor.log")
 IDENTITIES_FILE = os.path.join(DATA_DIR, "active_identities.json")
 
 if USE_CUSTOM_TK:
-    ctk.set_appearance_mode("System")
-    ctk.set_default_color_theme("blue")
+    try:
+        ctk.set_appearance_mode("System")
+        ctk.set_default_color_theme("blue")
+    except:
+        print("[*] Theme initialization failed. Using high-compatibility mode.")
 
 class SourceMonitorApp:
     def __init__(self, root, initial_id=None, initial_ip=None):
@@ -72,19 +75,22 @@ class SourceMonitorApp:
             self.root.geometry("540x680")
 
             if USE_CUSTOM_TK:
-                self.target_id_var = ctk.StringVar()
+                self.target_id_var = ctk.StringVar(value="#Retin-")
                 self.manual_ip_var = ctk.StringVar()
                 self.status_msg_var = ctk.StringVar(value="Status: Stopped")
                 self.host_var = ctk.StringVar(value=f"Source Host: {platform.node()}")
                 self.port_var = ctk.StringVar(value="Active Port: Detecting...")
                 self.stream_var = ctk.StringVar(value="Media Stream: No")
             else:
-                self.target_id_var = tk.StringVar()
+                self.target_id_var = tk.StringVar(value="#Retin-")
                 self.manual_ip_var = tk.StringVar()
                 self.status_msg_var = tk.StringVar(value="Status: Stopped")
                 self.host_var = tk.StringVar(value=f"Source Host: {platform.node()}")
                 self.port_var = tk.StringVar(value="Active Port: Detecting...")
                 self.stream_var = tk.StringVar(value="Media Stream: No")
+
+            # Enforce prefix and character limit
+            self.target_id_var.trace_add("write", self._on_id_change)
 
             try:
                 self.root.lift()
@@ -99,9 +105,9 @@ class SourceMonitorApp:
             self.load_config()
             # Prioritize CLI arguments over saved config
             if initial_id:
+                if not initial_id.startswith("#Retin-"):
+                    initial_id = f"#Retin-{initial_id}"
                 self.target_id_var.set(initial_id)
-                # If ID is provided but IP is not, we clear the IP to force discovery for this new ID
-                # If both are provided, we use the new IP.
                 self.manual_ip_var.set(initial_ip if initial_ip else "")
             elif initial_ip:
                 self.manual_ip_var.set(initial_ip)
@@ -112,12 +118,23 @@ class SourceMonitorApp:
 
         # Auto-resume: Start monitoring if an ID is present
         active_id = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
-        if active_id:
+        if active_id and active_id != "#Retin-":
             self.log(f"Auto-starting with ID: {active_id}")
             if self.is_gui:
                 self.root.after(500, self.toggle_monitoring)
             else:
                 self.toggle_monitoring()
+
+    def _on_id_change(self, *args):
+        val = self.target_id_var.get()
+        prefix = "#Retin-"
+        if not val.startswith(prefix):
+            self.target_id_var.set(prefix)
+            return
+        
+        suffix = val[len(prefix):]
+        if len(suffix) > 4:
+            self.target_id_var.set(prefix + suffix[:4])
 
     def create_widgets(self):
         if USE_CUSTOM_TK:
@@ -130,11 +147,11 @@ class SourceMonitorApp:
                 self.main_frame,
                 textvariable=self.target_id_var,
                 height=45,
-                placeholder_text="Enter Site ID...",
-                corner_radius=22.5,
+                placeholder_text="e.g. 1234",
+                corner_radius=22,
                 justify='center',
                 border_width=1,
-                font=("Courier", 12.5)
+                font=("Courier", 12)
             )
             self.entry_id.pack(pady=10, padx=30, fill="x")
 
@@ -144,7 +161,7 @@ class SourceMonitorApp:
                 textvariable=self.manual_ip_var,
                 height=35,
                 placeholder_text="e.g. 192.168.1.100",
-                corner_radius=17.5,
+                corner_radius=17,
                 justify='center',
                 border_width=1,
                 font=("Courier", 12)
@@ -153,7 +170,7 @@ class SourceMonitorApp:
 
             ctk.CTkLabel(self.main_frame, text="(Leave blank for auto-discovery)", text_color="gray", font=("Helvetica", 11)).pack()
 
-            # Telemetry Info (Added more data info)
+            # Telemetry Info
             ctk.CTkLabel(self.main_frame, textvariable=self.host_var, font=("Courier", 12)).pack(pady=(10, 0))
             ctk.CTkLabel(self.main_frame, textvariable=self.port_var, font=("Courier", 12)).pack()
             ctk.CTkLabel(self.main_frame, textvariable=self.stream_var, font=("Courier", 12)).pack()
@@ -182,6 +199,7 @@ class SourceMonitorApp:
             tk.Label(self.root, text="Target Tracker ID (Site ID):", font=('Helvetica', 10, 'bold')).pack(pady=(20, 5))
             self.entry_id = tk.Entry(self.root, textvariable=self.target_id_var, width=30, justify='center')
             self.entry_id.pack(pady=5)
+            tk.Label(self.root, text="(Prefix #Retin- is constant)", font=('Helvetica', 8)).pack()
             
             tk.Label(self.root, text="Manual Tracker IP (Optional):").pack()
             self.entry_ip = tk.Entry(self.root, textvariable=self.manual_ip_var, width=30, justify='center')
@@ -221,7 +239,10 @@ class SourceMonitorApp:
             try:
                 with open(CONFIG_FILE, "r") as f:
                     data = json.load(f)
-                    self.target_id_var.set(data.get("target_id", ""))
+                    val = data.get("target_id", "")
+                    if val and not val.startswith("#Retin-"):
+                        val = f"#Retin-{val}"
+                    self.target_id_var.set(val or "#Retin-")
                     self.manual_ip_var.set(data.get("manual_ip", ""))
             except: pass
 
@@ -231,30 +252,39 @@ class SourceMonitorApp:
         with open(CONFIG_FILE, "w") as f:
             json.dump({"target_id": current_id, "manual_ip": current_ip}, f)
 
-    def _update_active_identities(self, site_id, active):
+    def _update_active_identities(self, site_id, active, manual_ip=""):
         try:
             site_id = site_id.strip()
             if not site_id: return
-            active_ids = []
+            identities = {}
             if os.path.exists(IDENTITIES_FILE):
                 with open(IDENTITIES_FILE, "r") as f:
-                    try: active_ids = json.load(f).get("active_ids", [])
+                    try: 
+                        data = json.load(f)
+                        # Migration logic for old list-based active_ids
+                        if "active_ids" in data and "identities" not in data:
+                            for sid in data["active_ids"]:
+                                identities[sid] = {"manual_ip": ""}
+                        else:
+                            identities = data.get("identities", {})
                     except: pass
+            
             if active:
-                if site_id.lower() not in [sid.lower() for sid in active_ids]:
-                    active_ids.append(site_id)
+                identities[site_id] = {"manual_ip": manual_ip}
             else:
-                active_ids = [sid for sid in active_ids if sid.lower() != site_id.lower()]
+                if site_id in identities:
+                    del identities[site_id]
+            
             with open(IDENTITIES_FILE, "w") as f:
-                json.dump({"active_ids": active_ids}, f)
+                json.dump({"identities": identities}, f)
         except: pass
 
     def toggle_monitoring(self):
-        if not self.is_running:
-            active_id = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
-            manual_ip = (self.manual_ip_var.get() if self.is_gui else self.manual_ip_raw).strip()
+        active_id = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
+        manual_ip = (self.manual_ip_var.get() if self.is_gui else self.manual_ip_raw).strip()
 
-            if not active_id:
+        if not self.is_running:
+            if not active_id or active_id == "#Retin-":
                 if self.is_gui:
                     messagebox.showerror("Error", "Target Tracker ID is required.")
                     self.entry_id.focus_set()
@@ -269,7 +299,7 @@ class SourceMonitorApp:
                     return
 
             self.save_config()
-            self._update_active_identities(active_id, True)
+            self._update_active_identities(active_id, True, manual_ip)
             self.tracker_ip = None
             self.search_start_time = time.time()
             self.is_running = True
@@ -292,7 +322,6 @@ class SourceMonitorApp:
         else:
             self.is_running = False
             self.is_hibernating = False
-            active_id = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
             self._update_active_identities(active_id, False)
             if self.is_gui:
                 if USE_CUSTOM_TK:
@@ -312,7 +341,6 @@ class SourceMonitorApp:
             # 1. Get host's own local IP
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             try:
-                # Doesn't need to reach this IP, just used to find preferred interface
                 s.connect(('10.255.255.255', 1))
                 local_ip = s.getsockname()[0]
             except:
@@ -321,10 +349,9 @@ class SourceMonitorApp:
                 s.close()
 
             if local_ip == '127.0.0.1' and ip != '127.0.0.1':
-                return False # No network connection found
+                return False 
 
             # 2. Compare Subnets (First 3 octets /24)
-            # This is the most common definition of "Same WiFi connection" for field work
             local_prefix = ".".join(local_ip.split('.')[:3])
             target_prefix = ".".join(ip.split('.')[:3])
 
@@ -370,34 +397,24 @@ class SourceMonitorApp:
         except: return True
 
     def get_active_ports(self):
-        """Detects physical display output ports currently active."""
         system = platform.system()
         cflags = 0x08000000 if system == "Windows" else 0
         ports = []
         try:
             if system == "Darwin":
-                # 1. Fast check via ioreg (Hardware Registry)
                 ioreg_out = ""
                 try: ioreg_out = subprocess.check_output(["ioreg", "-n", "AppleDisplay", "-r"], timeout=2).decode().upper()
                 except: pass
-
-                # 2. Detailed check via system_profiler
                 sp_out = ""
                 try: sp_out = subprocess.check_output(["system_profiler", "SPDisplaysDataType"], timeout=3).decode().upper()
                 except: pass
-
-                # Look for specific connection signatures
                 if "HDMI" in ioreg_out or "HDMI" in sp_out: ports.append("HDMI")
                 if "DISPLAYPORT" in ioreg_out or "DISPLAYPORT" in sp_out: ports.append("DP/USB-C")
                 if "DVI" in ioreg_out or "DVI" in sp_out: ports.append("DVI")
                 if "VGA" in ioreg_out or "VGA" in sp_out: ports.append("VGA")
-
-                # Fallback: Check if multiple displays are "Online" but type is generic
                 if not ports and sp_out.count("ONLINE: YES") > 1:
                     ports.append("External Monitor")
-
             elif system == "Windows":
-                # Use a faster, lighter query for Windows
                 cmd = "powershell -Command \"Get-WmiObject Win32_PnPEntity | Where-Object { $_.Service -eq 'monitor' } | Select-Object -ExpandProperty Name\""
                 output = subprocess.check_output(cmd, shell=True, creationflags=cflags, timeout=3).decode().strip()
                 if output:
@@ -407,18 +424,15 @@ class SourceMonitorApp:
                 if not ports:
                     ports.append("Display Active")
             else:
-                # Linux (X11)
                 output = subprocess.check_output("xrandr --query", shell=True).decode()
                 for line in output.split('\n'):
                     if " connected " in line and "primary" not in line:
                         ports.append(line.split()[0])
         except Exception as e:
             self.log(f"Port detection error: {e}")
-
         return ",".join(ports) if ports else "Internal/None"
 
     def check_transmission(self):
-        """Checks if the system is actively transmitting video/audio signals."""
         system = platform.system()
         cflags = 0x08000000 if system == "Windows" else 0
         try:
@@ -428,15 +442,11 @@ class SourceMonitorApp:
                 is_audio = any("PreventUserIdleSystemSleep" in l and " 1" in l for l in output.splitlines())
                 return "YES" if (is_video or is_audio) else "NO"
             elif system == "Windows":
-                # Strategy 1: Power Requests (requires admin for some fields)
                 output = subprocess.check_output("powercfg /requests", shell=True, creationflags=cflags, timeout=2).decode().upper()
                 is_power_video = "DISPLAY:" in output and "NONE" not in output.split("DISPLAY:")[1].split("\n")[1]
                 is_power_audio = "AUDIO:" in output and "NONE" not in output.split("AUDIO:")[1].split("\n")[1]
-
                 if is_power_video or is_power_audio:
                     return "YES"
-
-                # Strategy 2: Simple process heuristic for Windows: If a known player is HEALTHY and has CPU usage > 0.5%
                 players = ["vlc", "chrome", "msedge", "wmplayer", "mpv", "gst-launch", "magicinfo", "webos"]
                 for player in players:
                     check_cmd = f"powershell -Command \"Get-Process {player} -ErrorAction SilentlyContinue | Where-Object {{ $_.CPU -gt 0.5 }} | Select-Object -ExpandProperty Id\""
@@ -444,18 +454,14 @@ class SourceMonitorApp:
                         res = subprocess.check_output(check_cmd, shell=True, creationflags=cflags, timeout=1).decode().strip()
                         if res: return "YES"
                     except: continue
-
-        except:
-            pass
+        except: pass
         return "NO"
 
     def get_current_media_title(self):
-        """Attempts to extract the title/filename of the media currently playing from common signage players."""
         system = platform.system()
         cflags = 0x08000000 if system == "Windows" else 0
         try:
             if system == "Darwin":
-                # macOS: Improved multi-player detection with explicit variable scoping
                 script = '''
                 set finalTitle to "NONE"
                 try
@@ -463,7 +469,6 @@ class SourceMonitorApp:
                         set frontProcess to first application process whose frontmost is true
                         set frontName to name of frontProcess
                     end tell
-                    
                     if frontName is "VLC" then
                         tell application "VLC" to set finalTitle to name of current item
                     else if frontName is "QuickTime Player" then
@@ -475,7 +480,6 @@ class SourceMonitorApp:
                     else if frontName contains "Safari" then
                         tell application "Safari" to set finalTitle to name of window 1
                     else
-                        -- Check background players via System Events (Passive)
                         tell application "System Events"
                             if exists (application process "VLC") then
                                 tell application "VLC" to set finalTitle to name of current item
@@ -486,8 +490,6 @@ class SourceMonitorApp:
                                 tell application "QuickTime Player" to set finalTitle to name of document 1
                             end if
                         end tell
-
-                        -- Global Fallback: Get the title of the frontmost window (Common for custom signage players)
                         if finalTitle is "NONE" then
                             tell application "System Events"
                                 tell frontProcess
@@ -502,57 +504,43 @@ class SourceMonitorApp:
                 return finalTitle
                 '''
                 title = subprocess.check_output(["osascript", "-e", script]).decode().strip()
-                # Filter out system UI titles
                 ignored = ["", "none", "desktop", "finder", "dock", "loginwindow", "system events", "control center", "siri", "notification center", "screen sharing"]
                 if title.lower() in ignored: return "NONE"
                 return title if len(title) > 2 else "NONE"
-
             elif system == "Windows":
-                # Windows: Prioritized detection for signage players (mpv, VLC, Chrome, MagicINFO, etc.)
                 system_titles = ["task manager", "settings", "microsoft text input", "program manager", "calculator", "microsoft store", "windows input experience", "taskbar", "start"]
-
-                # 1. Direct Foreground Window Check (Best for Signage players in full-screen)
                 fg_cmd = 'powershell -Command "$sig = \'[DllImport(\\\"user32.dll\\\", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount); [DllImport(\\\"user32.dll\\\")] public static extern IntPtr GetForegroundWindow();\'; Add-Type -MemberDefinition $sig -Name Win32Utils -Namespace Win32; $hwnd = [Win32.Win32Utils]::GetForegroundWindow(); $sb = New-Object System.Text.StringBuilder 256; $null = [Win32.Win32Utils]::GetWindowText($hwnd, $sb, $sb.Capacity); $sb.ToString()"'
                 try:
                     title = subprocess.check_output(fg_cmd, shell=True, creationflags=cflags, timeout=2).decode().strip()
                     if title and len(title) > 3 and title.lower() not in system_titles:
-                        # Return if it looks like content (contains extension or isn't just the player name)
                         if any(ext in title.lower() for ext in [".mp4", ".mov", ".avi", ".mkv", ".jpg", ".png", ".webp", ".html"]):
                             return title
-                        # If it's MagicINFO or webOS signage, their window title often IS the content or playlist name
                         if any(p in title.lower() for p in ["magicinfo", "webos", "signage", "brightsign", "player"]):
                             return title
                 except: pass
-
-                # 2. Modern Media System (Chrome, modern WMP, Spotify)
                 smtc_cmd = 'powershell -Command "[Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime] | Out-Null; $m = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync().GetAwaiter().GetResult(); $s = $m.GetCurrentSession(); if ($s) { $p = $s.TryGetMediaPropertiesAsync().GetAwaiter().GetResult(); $p.Title }"'
                 try:
                     smtc_title = subprocess.check_output(smtc_cmd, shell=True, creationflags=cflags, timeout=2).decode().strip()
                     if smtc_title and len(smtc_title) > 2:
                         return smtc_title
                 except: pass
-
-                # 3. Process Scan Fallback (Detects mpv, vlc, chromium, gst-launch, magicinfo)
                 cmd = "powershell -Command \"Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object -ExpandProperty MainWindowTitle\""
                 try:
                     output = subprocess.check_output(cmd, shell=True, creationflags=cflags, timeout=3).decode().strip()
                     if output:
                         titles = output.split('\n')
                         media_exts = [".mp4", ".mov", ".avi", ".mkv", ".jpg", ".jpeg", ".png", ".webp", ".html", "index"]
-                        # First pass: look for files
                         for t in titles:
                             t = t.strip()
                             if any(ext in t.lower() for ext in media_exts):
                                 return t
-                        # Second pass: look for players
                         players_keywords = ["mpv", "vlc", "chrome", "chromium", "gst-launch", "magicinfo", "webos", "brightsign"]
                         for t in titles:
                             t = t.strip()
                             if any(k in t.lower() for k in players_keywords) and len(t) > 3:
                                 return t
                 except: pass
-        except:
-            pass
+        except: pass
         return "NONE"
 
     def monitoring_loop(self):
@@ -563,15 +551,12 @@ class SourceMonitorApp:
                     found_ip = manual_ip
                 else:
                     found_ip = self.find_tracker_ip()
-                
                 active_id = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
-
                 if found_ip:
                     if self.tracker_ip != found_ip:
                         self.log(f"🔄 Tracker IP for {active_id} changed or rediscovered: {found_ip}")
                         self.tracker_ip = found_ip
                     self.search_start_time = time.time()
-
                 elapsed = time.time() - self.search_start_time
                 if elapsed > 30:
                     self.log(f"⚠️ Tracker not found for {active_id}. Resetting...")
@@ -579,40 +564,28 @@ class SourceMonitorApp:
                     if self.is_gui: self.root.after(0, self._start_hibernation)
                     else: self.is_running = False
                     return
-
                 if not self.tracker_ip:
                     self.update_status("Status: Searching for Tracker...")
                     time.sleep(1)
                     continue
-
                 status = "HEALTHY" if self.is_media_playing() else "NO_MEDIA"
                 active_ports = self.get_active_ports()
                 transmitting = self.check_transmission()
                 media_title = self.get_current_media_title()
-
-                # Sanitize media title for network transport (remove colons)
                 media_title = media_title.replace(":", "-").replace("\n", " ").strip()
-
                 if active_ports == "Internal/None": transmitting = "NO"
-
                 if self.is_gui:
                     self.root.after(0, lambda: self.port_var.set(f"Active Port: {active_ports}"))
                     self.root.after(0, lambda: self.stream_var.set(f"Media Stream: {transmitting}"))
-
                 source_time = int(time.time() * 1000)
-                # Protocol: PULSE:STATUS:HOSTNAME:PORTS:TIMESTAMP:TRANSMITTING:MEDIA_TITLE:SITE_ID
                 message = f"PULSE:{status}:{platform.node()}:{active_ports}:{source_time}:{transmitting}:{media_title}:{active_id}"
-
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                     s.settimeout(2.0)
                     s.sendto(message.encode(), (self.tracker_ip, HEARTBEAT_PORT))
                     self.update_status(f"Status: Connected to {self.tracker_ip}")
-
                     if self.is_gui:
                         self.root.after(0, lambda: self.btn_toggle.configure(text="Stop Monitoring", fg_color="#dc3545", hover_color="#c82333", text_color="white") if USE_CUSTOM_TK else self.btn_toggle.config(text="Stop Monitoring", bg="red"))
-
                     self.search_start_time = time.time()
-
             except Exception as e:
                 self.log(f"Connection error: {e}")
                 self.tracker_ip = None
@@ -622,31 +595,24 @@ class SourceMonitorApp:
 
     def find_tracker_ip(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            # Enable port reuse for multi-instance support
             if platform.system() == "Windows":
                 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             else:
                 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-
             s.bind(('', BROADCAST_PORT))
-            s.settimeout(1.5) # Increased timeout for multi-instance stability
+            s.settimeout(1.5)
             try:
-                data, addr = s.recvfrom(2048) # Increased buffer size
+                data, addr = s.recvfrom(2048)
                 parts = data.decode().split(":")
                 if parts[0] == "DOOH_TRACKER_ADVERT":
-                    # Android broadcasts a CSV list of SiteID|Owner pairs
-                    # Example: SiteA|Machine1,SiteB|NONE,SiteC|Machine2
                     raw_sites = parts[2].split(",")
                     target = (self.target_id_var.get() if self.is_gui else self.target_id_raw).strip()
                     my_node = platform.node()
-                    
                     for item in raw_sites:
                         site_parts = item.split("|")
                         if len(site_parts) < 2: continue
-                        
                         sid = site_parts[0]
                         owner = site_parts[1]
-                        
                         if sid.lower() == target.lower():
                             if owner == "NONE" or owner == my_node:
                                 return addr[0]
@@ -680,35 +646,72 @@ if __name__ == "__main__":
     parser.add_argument("--cli", action="store_true", help="Run in CLI mode")
     args = parser.parse_args()
 
-    # Orchestrator Logic: If launched without ID, spawn all previously active instances
+    # Orchestrator Logic: Spawn all previously active instances with their saved IPs
     if not args.id and not args.cli:
         identities_path = os.path.join(get_app_data_path(), "active_identities.json")
         if os.path.exists(identities_path):
             try:
                 with open(identities_path, "r") as f:
                     data = json.load(f)
-                    active_ids = data.get("active_ids", [])
+                    # Handle migration from old list structure
+                    if "active_ids" in data and "identities" not in data:
+                        identities = {sid: {"manual_ip": ""} for sid in data["active_ids"]}
+                    else:
+                        identities = data.get("identities", {})
                 
-                if active_ids:
-                    print(f"[*] Resuming {len(active_ids)} instances...")
-                    for sid in active_ids:
+                if identities:
+                    print(f"[*] Resuming {len(identities)} active instances...")
+                    script_path = os.path.abspath(__file__)
+                    for sid, cfg in identities.items():
                         cflags = subprocess.CREATE_NEW_CONSOLE if platform.system() == "Windows" else 0
-                        # Note: manual IP is not easily handled here without persisting it per-ID
-                        subprocess.Popen([sys.executable, __file__, "--id", sid], creationflags=cflags)
+                        cmd = [sys.executable, script_path, "--id", sid]
+                        manual_ip = cfg.get("manual_ip", "")
+                        if manual_ip:
+                            cmd.extend(["--ip", manual_ip])
+                        subprocess.Popen(cmd, creationflags=cflags)
                     sys.exit(0)
             except Exception as e:
                 print(f"[*] Orchestrator error: {e}")
 
     if not args.cli:
-        try:
-            root = ctk.CTk() if USE_CUSTOM_TK else tk.Tk()
-            if platform.system() == "Darwin":
-                subprocess.Popen(['osascript', '-e', f'tell application "System Events" to set frontmost of the first process whose unix id is {os.getpid()} to true'])
-            app = SourceMonitorApp(root, initial_id=args.id, initial_ip=args.ip)
-            root.mainloop()
-        except: args.cli = True
+        root = None
+        # Layer 1: Attempt Modern UI
+        if USE_CUSTOM_TK:
+            try:
+                root = ctk.CTk()
+            except Exception as e:
+                print(f"[*] CustomTkinter failed: {e}. Falling back to standard Tkinter...")
+                USE_CUSTOM_TK = False
+
+        # Layer 2: Attempt Standard UI
+        if not root:
+            try:
+                import tkinter as tk
+                from tkinter import messagebox, scrolledtext
+                root = tk.Tk()
+            except Exception as e:
+                print(f"[*] Standard Tkinter failed: {e}. Falling back to CLI mode...")
+                args.cli = True
+
+        if root:
+            try:
+                if platform.system() == "Darwin":
+                    try:
+                        # Bring window to front on macOS
+                        subprocess.Popen(['osascript', '-e', f'tell application "System Events" to set frontmost of the first process whose unix id is {os.getpid()} to true'])
+                    except: pass
+                
+                app = SourceMonitorApp(root, initial_id=args.id, initial_ip=args.ip)
+                root.mainloop()
+            except Exception as e:
+                print(f"[*] GUI Runtime error: {e}")
+                args.cli = True
+
     if args.cli:
+        print("[*] Running in CLI mode...")
         app = SourceMonitorApp(None, initial_id=args.id, initial_ip=args.ip)
         try:
             while True: time.sleep(1)
-        except KeyboardInterrupt: sys.exit(0)
+        except KeyboardInterrupt:
+            print("\n[*] Exiting monitor.")
+            sys.exit(0)

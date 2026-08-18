@@ -617,7 +617,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                 }
 
                                 "video" -> {
-                                    AndroidView(
+                                    /*AndroidView(
                                         factory = { ctx ->
                                             PlayerView(ctx).apply {
                                                 player = playbackManager.player
@@ -629,7 +629,7 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                                 setShutterBackgroundColor(android.graphics.Color.BLACK)
                                                 setBackgroundColor(android.graphics.Color.BLACK)
                                                 setKeepContentOnPlayerReset(true)
-                                                
+
                                                 layoutParams = ViewGroup.LayoutParams(
                                                     ViewGroup.LayoutParams.MATCH_PARENT,
                                                     ViewGroup.LayoutParams.MATCH_PARENT
@@ -645,7 +645,31 @@ fun DashboardScreen(viewModel: DashboardViewModel) {
                                         onRelease = { view ->
                                             view.player = null
                                         }
-                                    )
+                                    )*/
+
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(Color(0xFF1B2E1B)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(
+                                                "CAMPAIGN VERIFIED",
+                                                color = StatusGreen,
+                                                fontWeight = FontWeight.Bold,
+                                                style = MaterialTheme.typography.labelLarge
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                campaign?.name ?: "Unknown Campaign",
+                                                color = Color.White,
+                                                textAlign = TextAlign.Center,
+                                                modifier = Modifier.padding(horizontal = 16.dp),
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
+                                    }
                                 }
 
                                 else -> {
@@ -1383,14 +1407,13 @@ fun AllAdsDialog(identity: IdentityUiModel, onDismiss: () -> Unit, viewModel: Da
             shape = MaterialTheme.shapes.medium,
             colors = SurfaceDefaults.colors(containerColor = Color(0xFF1E2136)),
             modifier = Modifier
-                .wrapContentSize()
-                .widthIn(max = 550.dp)
                 .padding(24.dp)
+                .widthIn(max = 550.dp)
+                .heightIn(max = 500.dp)
         ) {
             Column(
                 modifier = Modifier.padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
                     text = "References for ${identity.siteId}",
@@ -1399,16 +1422,22 @@ fun AllAdsDialog(identity: IdentityUiModel, onDismiss: () -> Unit, viewModel: Da
                     fontWeight = FontWeight.Bold
                 )
 
+                Spacer(modifier = Modifier.height(16.dp))
+
                 if (identity.campaigns.isEmpty()) {
-                    Text("No campaigns found for this site.", color = Color.Gray, modifier = Modifier.padding(vertical = 10.dp))
+                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        Text("No campaigns found for this site.", color = Color.Gray)
+                    }
                 } else {
-                    Column(
+                    LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .weight(1f)
                             .padding(horizontal = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(vertical = 8.dp)
                     ) {
-                        identity.campaigns.forEach { brief ->
+                        items(identity.campaigns) { brief ->
                             Surface(
                                 onClick = { if (brief.isVerified) viewModel.previewCampaign(brief.id) },
                                 shape = ClickableSurfaceDefaults.shape(MaterialTheme.shapes.small),
@@ -1472,7 +1501,7 @@ fun AllAdsDialog(identity: IdentityUiModel, onDismiss: () -> Unit, viewModel: Da
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 TvButton(
                     onClick = onDismiss,
