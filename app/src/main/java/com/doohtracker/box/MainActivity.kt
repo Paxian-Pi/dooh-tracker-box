@@ -3,10 +3,12 @@ package com.doohtracker.box
 import android.content.pm.ActivityInfo
 import android.content.Intent
 import android.hardware.usb.UsbManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -51,6 +53,7 @@ class MainActivity : ComponentActivity() {
         usbConnectionMonitor.triggerCheck()
     }
 
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     @androidx.annotation.OptIn(UnstableApi::class)
     @OptIn(ExperimentalTvMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -69,7 +72,8 @@ class MainActivity : ComponentActivity() {
                 android.Manifest.permission.CAMERA,
                 android.Manifest.permission.RECORD_AUDIO,
                 android.Manifest.permission.ACCESS_FINE_LOCATION,
-                android.Manifest.permission.ACCESS_COARSE_LOCATION
+                android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                android.Manifest.permission.POST_NOTIFICATIONS
             )
         )
         

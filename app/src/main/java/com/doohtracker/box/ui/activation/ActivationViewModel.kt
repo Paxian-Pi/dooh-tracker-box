@@ -22,7 +22,7 @@ class ActivationViewModel @Inject constructor(
     val username: StateFlow<String> = _username.asStateFlow()
 
     private val _location = MutableStateFlow("")
-    val installationNotes: StateFlow<String> = _location.asStateFlow()
+    val deviceLocation: StateFlow<String> = _location.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()

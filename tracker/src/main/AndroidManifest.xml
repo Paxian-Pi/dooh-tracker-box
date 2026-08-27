@@ -8,7 +8,7 @@
             android:foregroundServiceType="specialUse"
             android:exported="false">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="DOOH verification tracking requires 24/7 monitoring of HDMI input streams and scheduled campaigns."/>
+                android:value="Autonomous DOOH audit requires 24/7 real-time monitoring of networked billboard heartbeat pulses to verify advertisement compliance without gaps."/>
         </service>
 
         <service

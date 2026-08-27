@@ -5,7 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.util.UnstableApi
 import com.doohtracker.box.data.logic.VerificationGatekeeper
@@ -44,7 +47,18 @@ class TrackerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        startForeground(NOTIFICATION_ID, createNotification())
+        Log.d("TrackerService", "onCreate called")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            Log.d("TrackerService", "Starting foreground service with type specialUse")
+            startForeground(
+                NOTIFICATION_ID,
+                createNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            Log.d("TrackerService", "Starting foreground service")
+            startForeground(NOTIFICATION_ID, createNotification())
+        }
         observeTrackingLogic()
         startPendingLogsSyncLoop()
         startPeriodicCampaignSync()
@@ -146,14 +160,17 @@ class TrackerService : Service() {
         val channelName = "Campaign Tracker"
         val manager = getSystemService(NotificationManager::class.java)
         
+        Log.d("TrackerService", "Creating notification channel: $channelId")
         manager.createNotificationChannel(
-            NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_DEFAULT)
         )
 
         return NotificationCompat.Builder(this, channelId)
             .setContentTitle("DOOH Tracker Active")
-            .setContentText("Monitoring campaigns and HDMI signal...")
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setContentText("Monitoring campaigns and networked billboard signals...")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
     }
 

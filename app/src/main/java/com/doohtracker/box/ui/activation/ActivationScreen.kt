@@ -24,8 +24,10 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -40,7 +42,7 @@ import com.doohtracker.box.ui.theme.StatusRed
 fun ActivationScreen(viewModel: ActivationViewModel, clearHub: DashboardViewModel) {
     val activationCode by viewModel.activationCode.collectAsState()
     val username by viewModel.username.collectAsState()
-    val installationNotes by viewModel.installationNotes.collectAsState()
+    val deviceLocation by viewModel.deviceLocation.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val stagedIdentities by viewModel.stagedIdentities.collectAsState()
@@ -136,9 +138,9 @@ fun ActivationScreen(viewModel: ActivationViewModel, clearHub: DashboardViewMode
 
                 if (stagedIdentities.isEmpty()) {
                     TvInputField(
-                        value = installationNotes,
+                        value = deviceLocation,
                         onValueChange = { viewModel.onInstallationNotesChange(it) },
-                        label = "Global Location Details",
+                        label = "Device Location",
                         placeholder = "e.g. LOC_AIRPORT_LAGOS",
                         imeAction = ImeAction.Done,
                         onDone = { /* viewModel.validateAndAddIdentity() */ },
@@ -375,6 +377,21 @@ fun TvInputField(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
+    // Maintain a TextFieldValue to control cursor position
+    var textFieldValueState by remember {
+        mutableStateOf(TextFieldValue(text = value, selection = TextRange(value.length)))
+    }
+
+    // Sync external changes into our local TextFieldValue
+    LaunchedEffect(value) {
+        if (value != textFieldValueState.text) {
+            textFieldValueState = textFieldValueState.copy(
+                text = value,
+                selection = TextRange(value.length)
+            )
+        }
+    }
+
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
             text = label,
@@ -409,12 +426,17 @@ fun TvInputField(
                 .onFocusChanged {
                     if (it.isFocused) {
                         focusRequester.requestFocus()
+                        // Ensure cursor is at the end when focused
+                        textFieldValueState = textFieldValueState.copy(selection = TextRange(textFieldValueState.text.length))
                     }
                 }
         ) {
             BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
+                value = textFieldValueState,
+                onValueChange = {
+                    textFieldValueState = it
+                    onValueChange(it.text)
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp)
