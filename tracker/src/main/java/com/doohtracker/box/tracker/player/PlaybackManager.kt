@@ -285,4 +285,10 @@ class PlaybackManager @Inject constructor(
             Log.d("Playback", "Manual preview finished. Returning to live mirror.")
         }
     }
+
+    fun reset() {
+        stopPlayback()
+        _mismatchedTitle.value = null
+        _isPreviewActive.value = false
+    }
 }

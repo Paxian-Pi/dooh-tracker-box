@@ -35,7 +35,16 @@ class CampaignRepository @Inject constructor(
     private val mediaDownloader: MediaDownloader,
     private val timeProvider: TimeProvider
 ) {
+    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     val allCampaigns: Flow<List<CampaignEntity>> = campaignDao.getAllCampaigns()
+    
+    /**
+     * Memory-cached list of all campaigns to avoid frequent DB hits in high-frequency loops.
+     */
+    val cachedCampaigns: StateFlow<List<CampaignEntity>> = allCampaigns
+        .stateIn(repositoryScope, SharingStarted.Eagerly, emptyList())
+
     val recentLogs: Flow<List<TrackingLogEntity>> = trackingLogDao.getRecentLogs()
     val identities: Flow<List<Identity>> = deviceManager.identitiesFlow
     val isDarkModeEnabled: Flow<Boolean> = deviceManager.isDarkModeEnabledFlow
@@ -144,7 +153,7 @@ class CampaignRepository @Inject constructor(
                     }
 
                     if (matchedResults.isNotEmpty()) {
-                        val existingCampaigns = campaignDao.getAllCampaigns().first()
+                        val existingCampaigns = cachedCampaigns.value
                         
                         val identityEntities = matchedResults.map { dto ->
                             val entity = dto.toEntity().normalizeUrl()
@@ -257,7 +266,7 @@ class CampaignRepository @Inject constructor(
 
     suspend fun processBillboardPulse(currentTime: Long, metadata: SourceMetadata, locationString: String) {
         val reportedTitle = metadata.mediaTitle.lowercase()
-        val allCampaignsNow = campaignDao.getAllCampaigns().first()
+        val allCampaignsNow = cachedCampaigns.value
 
         val reportingSiteId = metadata.siteId.uppercase()
         val siteCampaigns = allCampaignsNow.filter { 
@@ -340,8 +349,10 @@ class CampaignRepository @Inject constructor(
     }
 
     suspend fun trackCurrentCampaigns(currentTime: Long, locationString: String) {
-        val activeCampaigns = campaignDao.getActiveCampaigns(currentTime).first()
-        val allMetadataMap = signalMonitor.allSourceMetadata.first()
+        val activeCampaigns = cachedCampaigns.value.filter { 
+            it.startTime <= currentTime && it.endTime >= currentTime 
+        }
+        val allMetadataMap = signalMonitor.allSourceMetadata.value
         
         if (allMetadataMap.isEmpty()) {
             Log.d("Tracking", "No active source monitor link. Skipping background compliance tracking.")
@@ -535,6 +546,11 @@ class CampaignRepository @Inject constructor(
         campaignDao.clearAll()
         trackingLogDao.clearAll()
         mediaDownloader.clearMedia()
+        
+        // Clear in-memory tracking state
+        activeSessions.clear()
+        lastPulseTime = 0L
+        lastSyncAttemptedTitle = null
     }
 
     suspend fun removeIdentity(siteId: String) {

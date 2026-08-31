@@ -115,5 +115,8 @@ class DeviceManager @Inject constructor(
 
     fun logout() {
         prefs.edit { clear() }
+        _identitiesFlow.value = emptyList()
+        _isDarkModeEnabledFlow.value = true
+        _isLocalMonitoringEnabledFlow.value = false
     }
 }

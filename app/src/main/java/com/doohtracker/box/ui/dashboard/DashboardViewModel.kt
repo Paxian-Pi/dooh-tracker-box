@@ -253,9 +253,11 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
         systemActions.openDateTimeSettings()
     }
 
+    @androidx.annotation.OptIn(UnstableApi::class)
     fun clearData() {
         viewModelScope.launch {
             campaignRepository.clearData()
+            playbackManager.reset()
             _onLogoutSuccess.emit(Unit)
         }
     }

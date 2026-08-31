@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.fillMaxSize
@@ -57,6 +58,7 @@ class MainActivity : ComponentActivity() {
     @androidx.annotation.OptIn(UnstableApi::class)
     @OptIn(ExperimentalTvMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         
         // Block automated requests if OS handled the launch via USB
@@ -73,7 +75,8 @@ class MainActivity : ComponentActivity() {
                 android.Manifest.permission.RECORD_AUDIO,
                 android.Manifest.permission.ACCESS_FINE_LOCATION,
                 android.Manifest.permission.ACCESS_COARSE_LOCATION,
-                android.Manifest.permission.POST_NOTIFICATIONS
+                android.Manifest.permission.POST_NOTIFICATIONS,
+                android.Manifest.permission.NEARBY_WIFI_DEVICES
             )
         )
         

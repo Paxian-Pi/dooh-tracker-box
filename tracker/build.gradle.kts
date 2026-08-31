@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.doohtracker.box.tracker"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 26

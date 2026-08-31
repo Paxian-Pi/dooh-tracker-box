@@ -8,13 +8,14 @@ plugins {
 
 android {
     namespace = "com.doohtracker.box"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.doohtracker.box"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 2
+        //noinspection OldTargetApi
+        targetSdk = 36
+        versionCode = 9
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -22,7 +23,8 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -61,6 +63,8 @@ dependencies {
     implementation(libs.androidx.tv.foundation)
     implementation(libs.androidx.tv.material)
     
+    implementation(libs.androidx.profileinstaller)
+
     // Media3
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
