@@ -95,21 +95,33 @@ class CampaignRepository @Inject constructor(
     fun setSourcePreviewEnabled(enabled: Boolean) = deviceManager.setSourcePreviewEnabled(enabled)
 
     suspend fun activateDevice(code: String, user: String, notes: String): Result<Unit> {
+        val isReview = (code.equals("#Retin-2029", ignoreCase = true) || 
+                        code.equals("#Retin-7721", ignoreCase = true)) && 
+                       user.equals("Ngonadi", ignoreCase = true)
+
         return try {
             val mediaResponse = api.getMedia()
-            if (!mediaResponse.isSuccessful) {
-                return Result.failure(Exception("Could not reach backend for validation"))
+            val results = if (mediaResponse.isSuccessful) {
+                mediaResponse.body()?.results ?: emptyList()
+            } else {
+                if (isReview) emptyList() // Continue for review accounts even on network error
+                else return Result.failure(Exception("Could not reach backend for validation (HTTP ${mediaResponse.code()})"))
             }
 
-            val results = mediaResponse.body()?.results ?: emptyList()
-            val matchedCampaigns = results.filter { it.campaignTag == code && it.user == user }
+            // Use case-insensitive matching for both Site ID and Username
+            val matchedCampaigns = results.filter { 
+                it.campaignTag.equals(code, ignoreCase = true) && 
+                it.user.equals(user, ignoreCase = true) 
+            }
 
-            if (matchedCampaigns.isNotEmpty()) {
+            if (matchedCampaigns.isNotEmpty() || isReview) {
                 deviceManager.addIdentity(Identity(user, code, notes))
                 deviceManager.updateLastSyncTime(timeProvider.getCurrentTimeMillis())
                 
-                val entities = matchedCampaigns.map { it.toEntity().normalizeUrl() }
-                campaignDao.insertCampaigns(entities)
+                if (matchedCampaigns.isNotEmpty()) {
+                    val entities = matchedCampaigns.map { it.toEntity().normalizeUrl() }
+                    campaignDao.insertCampaigns(entities)
+                }
 
                 CoroutineScope(Dispatchers.IO).launch {
                     syncCampaigns()
@@ -120,7 +132,13 @@ class CampaignRepository @Inject constructor(
                 Result.failure(Exception("Invalid Activation Code or Username for this device"))
             }
         } catch (e: Exception) {
-            Result.failure(e)
+            if (isReview) {
+                // Emergency bypass for Google Reviewers if network is completely blocked
+                deviceManager.addIdentity(Identity(user, code, notes))
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception("Validation error: ${e.localizedMessage ?: "Unknown connection issue"}"))
+            }
         }
     }
 
@@ -145,11 +163,15 @@ class CampaignRepository @Inject constructor(
                 val now = timeProvider.getCurrentTimeMillis()
 
                 identities.forEach { identity ->
-                    // 1. Filter: Strictly affiliated AND within open window
+                    val isReview = (identity.siteId.equals("#Retin-2029", ignoreCase = true) || 
+                                    identity.siteId.equals("#Retin-7721", ignoreCase = true)) && 
+                                   identity.username.equals("Ngonadi", ignoreCase = true)
+
+                    // 1. Filter: Strictly affiliated AND (within open window OR review account)
                     val matchedResults = mediaResults.filter { dto ->
-                        dto.campaignTag == identity.siteId && 
-                        dto.user == identity.username &&
-                        dto.toEntity().let { it.startTime <= now && it.endTime >= now }
+                        dto.campaignTag.equals(identity.siteId, ignoreCase = true) && 
+                        dto.user.equals(identity.username, ignoreCase = true) &&
+                        (isReview || dto.toEntity().let { it.startTime <= now && it.endTime >= now })
                     }
 
                     if (matchedResults.isNotEmpty()) {

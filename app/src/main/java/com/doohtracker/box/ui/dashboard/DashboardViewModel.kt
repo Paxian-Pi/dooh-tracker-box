@@ -11,6 +11,7 @@ import com.doohtracker.box.data.hardware.SignalMonitor
 import com.doohtracker.box.data.hardware.UsbConnectionMonitor
 import com.doohtracker.box.data.location.LocationMonitor
 import com.doohtracker.box.data.logic.VerificationGatekeeper
+import com.doohtracker.box.data.manager.Identity
 import com.doohtracker.box.data.repository.CampaignRepository
 import com.doohtracker.box.data.system.SystemHealth
 import com.doohtracker.box.data.system.SystemHealthMonitor
@@ -88,9 +89,22 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
         anyCampaignActive,
         campaignRepository.allCampaigns,
         signalMonitor.allSourceMetadata,
-        campaignRepository.deviceManager.isLocalMonitoringEnabledFlow
-    ) { linked, anyActive, all, allMetadata, isLocalEnabled ->
+        campaignRepository.deviceManager.isLocalMonitoringEnabledFlow,
+        campaignRepository.identities
+    ) { args ->
+        val linked = args[0] as Boolean
+        val anyActive = args[1] as Boolean
+        val all = args[2] as List<com.doohtracker.box.data.local.CampaignEntity>
+        val allMetadata = args[3] as Map<String, com.doohtracker.box.data.hardware.SourceMetadata>
+        val isLocalEnabled = args[4] as Boolean
+        val registeredIdentities = args[5] as List<Identity>
+
         val metadata = allMetadata.values.firstOrNull() 
+        val isReviewHub = registeredIdentities.any { id ->
+            (id.siteId.equals("#Retin-2029", ignoreCase = true) || id.siteId.equals("#Retin-7721", ignoreCase = true)) &&
+            id.username.equals("Ngonadi", ignoreCase = true)
+        }
+        
         when {
             linked -> {
                 val reportedTitle = metadata?.mediaTitle?.lowercase() ?: ""
@@ -111,6 +125,7 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
                 }
             }
             all.isNotEmpty() -> if (isLocalEnabled) "Waiting for Local Player..." else "Ready"
+            isReviewHub -> "Review Mode (Ready)"
             else -> "Inactive"
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Inactive")
@@ -132,6 +147,10 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
         
         registeredIdentities.map { identity ->
             val siteId = identity.siteId
+            val isReview = (siteId.equals("#Retin-2029", ignoreCase = true) || 
+                            siteId.equals("#Retin-7721", ignoreCase = true)) && 
+                           identity.username.equals("Ngonadi", ignoreCase = true)
+
             val identityCampaigns = allCampaigns.filter { it.campaignTag == siteId }
             val metadata = allMetadata[siteId]
             
@@ -140,7 +159,7 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
             val hasMissingActiveFiles = identityCampaigns.any { 
                 val url = it.mediaUrl?.lowercase() ?: ""
                 val isVideo = it.mediaType?.lowercase() == "video" || url.endsWith(".mp4")
-                !isVideo && it.startTime <= currentTime && it.endTime >= currentTime && it.mediaUrl != null && it.localPath == null 
+                !isVideo && (isReview || (it.startTime <= currentTime && it.endTime >= currentTime)) && it.mediaUrl != null && it.localPath == null 
             }
             val isDownloading = hasMissingActiveFiles || (identityCampaigns.isEmpty() && isDownloadingHubWide)
             
@@ -151,7 +170,7 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
                              reportedTitle.contains(campaign.name.lowercase())
                 
                 // Dashboard Compliance: Only show "Active" if window is open
-                isMatch && campaign.startTime <= currentTime && campaign.endTime >= currentTime
+                isMatch && (isReview || (campaign.startTime <= currentTime && campaign.endTime >= currentTime))
             }.takeIf { reportedTitle != "none" && reportedTitle.isNotEmpty() } ?: emptyList()
 
             val isTimedOut = (currentTime - (metadata?.lastSeen ?: 0L)) > 15000
@@ -161,7 +180,7 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
             
             when {
                 metadata == null || isTimedOut -> {
-                    status = "Ready"
+                    status = if (isReview) "Review Active" else "Ready"
                     statusColor = com.doohtracker.box.ui.theme.StatusCyan
                 }
                 matchedCampaigns.isNotEmpty() -> {
@@ -180,7 +199,7 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
 
             val allAdsString = identityCampaigns.joinToString(" | ") { it.name }.ifEmpty { "No Ads Staged" }
             val scheduledAdsString = identityCampaigns
-                .filter { it.startTime <= currentTime && it.endTime >= currentTime }
+                .filter { isReview || (it.startTime <= currentTime && it.endTime >= currentTime) }
                 .joinToString(" | ") { it.name }
                 .ifEmpty { "No Scheduled Campaigns" }
 
