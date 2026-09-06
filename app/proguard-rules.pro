@@ -17,6 +17,10 @@
 -keepattributes Signature
 -keepattributes *Annotation*
 -dontwarn sun.misc.**
+-keep class com.google.gson.** { *; }
+-keepclassmembers class * {
+    @com.google.gson.annotations.SerializedName <fields>;
+}
 -keep class com.google.gson.examples.android.model.** { <fields>; }
 -keep class com.google.gson.reflect.TypeToken
 -keep class * extends com.google.gson.reflect.TypeToken
@@ -37,7 +41,9 @@
 # Media3
 -dontwarn androidx.media3.**
 
-# App Specific Data Models
+# App Specific Data Models (Keep ALL model, entity, and DTO packages)
+-keep class com.doohtracker.box.data.model.** { *; }
 -keep class com.doohtracker.box.data.remote.** { *; }
--keep class com.doohtracker.box.data.manager.Identity { *; }
--keep class com.doohtracker.box.data.hardware.SourceMetadata { *; }
+-keep class com.doohtracker.box.data.local.** { *; }
+-keep class com.doohtracker.box.data.manager.** { *; }
+-keep class com.doohtracker.box.data.hardware.** { *; }

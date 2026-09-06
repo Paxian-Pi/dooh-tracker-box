@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<manifest
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
     <!-- ========================================= -->
@@ -9,9 +8,11 @@
     <!-- ========================================= -->
 
     <!-- Supports Android TV, but does not require it -->
+    <!-- For Android TV: android:required="true" -->
+    <!-- For Mobile: android:required="false" -->
     <uses-feature
         android:name="android.software.leanback"
-        android:required="false" />
+        android:required="true" />
 
     <!-- Allows installation on TVs without touchscreen -->
     <uses-feature
@@ -72,14 +73,14 @@
     <application
         android:name=".DoohTrackerApp"
         android:allowBackup="false"
-        android:fullBackupContent="false"
-        android:dataExtractionRules="@xml/data_extraction_rules"
         android:banner="@mipmap/tv_banner"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:usesCleartextTraffic="true"
-        android:theme="@style/Theme.DoohTrackerBox">
+        android:theme="@style/Theme.DoohTrackerBox"
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name=".MainActivity"
@@ -104,8 +105,7 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
-                <category
-                    android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
 
         </activity>

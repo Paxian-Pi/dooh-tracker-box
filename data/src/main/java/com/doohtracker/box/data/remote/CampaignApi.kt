@@ -18,6 +18,7 @@ interface CampaignApi {
 
     @GET("media/")
     suspend fun getMedia(): Response<MediaResponse>
+
     @GET("campaigns")
     suspend fun getCampaigns(): List<CampaignDto>
 

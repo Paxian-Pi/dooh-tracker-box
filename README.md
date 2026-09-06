@@ -1,7 +1,6 @@
 # Dooh Tracker 🚀
 
-An autonomous, production-grade verification tracker for Android TV Boxes. This system validates scheduled Digital Out-Of-Home (
-DOOH) campaigns against actual physical playback using a networked **Source Monitor** that provides content-level verification.
+An autonomous, production-grade verification tracker for Android TV Boxes. This system validates scheduled Digital Out-Of-Home (DOOH) campaigns against actual physical playback using a networked **Source Monitor** that provides content-level verification.
 
 ## 🏗 Project Architecture
 

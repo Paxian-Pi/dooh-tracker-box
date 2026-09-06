@@ -38,7 +38,7 @@ class CampaignRepository @Inject constructor(
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     val allCampaigns: Flow<List<CampaignEntity>> = campaignDao.getAllCampaigns()
-    
+
     /**
      * Memory-cached list of all campaigns to avoid frequent DB hits in high-frequency loops.
      */
@@ -62,19 +62,19 @@ class CampaignRepository @Inject constructor(
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     val isHubSyncing: Flow<Boolean> = allCampaigns.map { campaigns ->
         val now = timeProvider.getCurrentTimeMillis()
-        val hasMissingActiveFiles = campaigns.any { 
+        val hasMissingActiveFiles = campaigns.any {
             val url = it.mediaUrl?.lowercase() ?: ""
             val isVideo = it.mediaType?.lowercase() == "video" || url.endsWith(".mp4")
             // A file is only "missing" if it's NOT a video AND has no local path
             !isVideo && it.startTime <= now && it.endTime >= now && it.mediaUrl != null && it.localPath == null
         }
         val hasNoCampaigns = campaigns.isEmpty() && deviceManager.isActivated()
-        
+
         hasNoCampaigns || hasMissingActiveFiles
     }.distinctUntilChanged()
-    .debounce { syncing ->
-        if (syncing) 0L else 2000L // 2s stabilization buffer
-    }
+        .debounce { syncing ->
+            if (syncing) 0L else 2000L // 2s stabilization buffer
+        }
 
     // Hub Tracking: Keyed by Site ID
     private val activeSessions = mutableMapOf<String, PlaybackSession>()
@@ -95,33 +95,27 @@ class CampaignRepository @Inject constructor(
     fun setSourcePreviewEnabled(enabled: Boolean) = deviceManager.setSourcePreviewEnabled(enabled)
 
     suspend fun activateDevice(code: String, user: String, notes: String): Result<Unit> {
-        val isReview = (code.equals("#Retin-2029", ignoreCase = true) || 
-                        code.equals("#Retin-7721", ignoreCase = true)) && 
-                       user.equals("Ngonadi", ignoreCase = true)
-
         return try {
             val mediaResponse = api.getMedia()
-            val results = if (mediaResponse.isSuccessful) {
-                mediaResponse.body()?.results ?: emptyList()
-            } else {
-                if (isReview) emptyList() // Continue for review accounts even on network error
-                else return Result.failure(Exception("Could not reach backend for validation (HTTP ${mediaResponse.code()})"))
+            if (!mediaResponse.isSuccessful) {
+                return Result.failure(Exception("Could not reach backend for validation (HTTP ${mediaResponse.code()})"))
             }
+
+            val results = mediaResponse.body()?.results ?: emptyList()
+            Log.d("Activate", "Validation results: $results")
 
             // Use case-insensitive matching for both Site ID and Username
-            val matchedCampaigns = results.filter { 
-                it.campaignTag.equals(code, ignoreCase = true) && 
-                it.user.equals(user, ignoreCase = true) 
+            val matchedCampaigns = results.filter {
+                it.campaignTag.equals(code, ignoreCase = true) &&
+                        it.user.equals(user, ignoreCase = true)
             }
 
-            if (matchedCampaigns.isNotEmpty() || isReview) {
+            if (matchedCampaigns.isNotEmpty()) {
                 deviceManager.addIdentity(Identity(user, code, notes))
                 deviceManager.updateLastSyncTime(timeProvider.getCurrentTimeMillis())
-                
-                if (matchedCampaigns.isNotEmpty()) {
-                    val entities = matchedCampaigns.map { it.toEntity().normalizeUrl() }
-                    campaignDao.insertCampaigns(entities)
-                }
+
+                val entities = matchedCampaigns.map { it.toEntity().normalizeUrl() }
+                campaignDao.insertCampaigns(entities)
 
                 CoroutineScope(Dispatchers.IO).launch {
                     syncCampaigns()
@@ -129,26 +123,22 @@ class CampaignRepository @Inject constructor(
 
                 Result.success(Unit)
             } else {
-                Result.failure(Exception("Invalid Activation Code or Username for this device"))
+                Result.failure(Exception("Invalid Activation Code or Username for this device.\nEnsure also that there are no white spaces in your inputs!"))
             }
         } catch (e: Exception) {
-            if (isReview) {
-                // Emergency bypass for Google Reviewers if network is completely blocked
-                deviceManager.addIdentity(Identity(user, code, notes))
-                Result.success(Unit)
-            } else {
-                Result.failure(Exception("Validation error: ${e.localizedMessage ?: "Unknown connection issue"}"))
-            }
+            Log.e("Activate", "Error during device activation", e)
+            val errorMsg = e.localizedMessage ?: e.message ?: e.javaClass.simpleName
+            Result.failure(Exception("Validation error: $errorMsg"))
         }
     }
 
-    fun getActiveCampaigns(currentTime: Long): Flow<List<CampaignEntity>> = 
+    fun getActiveCampaigns(currentTime: Long): Flow<List<CampaignEntity>> =
         campaignDao.getActiveCampaigns(currentTime)
 
-    suspend fun getLogsSince(since: Long): List<TrackingLogEntity> = 
+    suspend fun getLogsSince(since: Long): List<TrackingLogEntity> =
         trackingLogDao.getLogsSince(since)
 
-    fun getLogsSinceFlow(since: Long): Flow<List<TrackingLogEntity>> = 
+    fun getLogsSinceFlow(since: Long): Flow<List<TrackingLogEntity>> =
         trackingLogDao.getLogsSinceFlow(since)
 
     suspend fun syncCampaigns() {
@@ -163,20 +153,16 @@ class CampaignRepository @Inject constructor(
                 val now = timeProvider.getCurrentTimeMillis()
 
                 identities.forEach { identity ->
-                    val isReview = (identity.siteId.equals("#Retin-2029", ignoreCase = true) || 
-                                    identity.siteId.equals("#Retin-7721", ignoreCase = true)) && 
-                                   identity.username.equals("Ngonadi", ignoreCase = true)
-
-                    // 1. Filter: Strictly affiliated AND (within open window OR review account)
+                    // 1. Filter: Strictly affiliated AND within open window
                     val matchedResults = mediaResults.filter { dto ->
-                        dto.campaignTag.equals(identity.siteId, ignoreCase = true) && 
-                        dto.user.equals(identity.username, ignoreCase = true) &&
-                        (isReview || dto.toEntity().let { it.startTime <= now && it.endTime >= now })
+                        dto.campaignTag.equals(identity.siteId, ignoreCase = true) &&
+                                dto.user.equals(identity.username, ignoreCase = true) &&
+                                dto.toEntity().let { it.startTime <= now && it.endTime >= now }
                     }
 
                     if (matchedResults.isNotEmpty()) {
                         val existingCampaigns = cachedCampaigns.value
-                        
+
                         val identityEntities = matchedResults.map { dto ->
                             val entity = dto.toEntity().normalizeUrl()
                             val existing = existingCampaigns.find { it.id == entity.id }
@@ -201,7 +187,7 @@ class CampaignRepository @Inject constructor(
                                 // SKIP VIDEO DOWNLOADS: We only verify titles for videos now.
                                 val url = entity.mediaUrl.lowercase()
                                 val isVideo = entity.mediaType?.lowercase() == "video" || url.endsWith(".mp4")
-                                
+
                                 if (isVideo) {
                                     Log.d("Sync", "Skipping video download for '${entity.name}': Verified via Title Only.")
                                     return@forEach
@@ -210,17 +196,20 @@ class CampaignRepository @Inject constructor(
                                 if (!_isDownloadingFiles.value) {
                                     _isDownloadingFiles.value = true
                                 }
-                                
+
                                 // Extract filename from URL (e.g. DJ___DOOH___TBS_Tower.mp4)
                                 val urlFilename = entity.mediaUrl.substringAfterLast("/").substringBefore("?")
                                 Log.d("Sync", "Downloading media for campaign '${entity.name}' from: ${entity.mediaUrl}")
-                                
+
                                 val file = mediaDownloader.downloadMedia(entity.mediaUrl, urlFilename)
-                                
+
                                 if (file != null && file.exists() && file.length() > 0) {
-                                    Log.d("Sync", "SUCCESS: File downloaded for '${entity.name}': ${file.absolutePath} (${file.length()} bytes)")
+                                    Log.d(
+                                        "Sync",
+                                        "SUCCESS: File downloaded for '${entity.name}': ${file.absolutePath} (${file.length()} bytes)"
+                                    )
                                     campaignDao.insertCampaigns(listOf(entity.copy(localPath = file.absolutePath)))
-                                    
+
                                     // Clear any previous error for this campaign
                                     val updatedErrors = _downloadErrors.value.toMutableMap()
                                     updatedErrors.remove(entity.id)
@@ -232,8 +221,11 @@ class CampaignRepository @Inject constructor(
                                         file.length() == 0L -> "Downloaded file is empty (0 bytes): ${file.absolutePath}"
                                         else -> "Unknown download error"
                                     }
-                                    Log.e("Sync", "FAILED: Download failed for campaign '${entity.name}' ($errorMsg). URL: ${entity.mediaUrl}")
-                                    
+                                    Log.e(
+                                        "Sync",
+                                        "FAILED: Download failed for campaign '${entity.name}' ($errorMsg). URL: ${entity.mediaUrl}"
+                                    )
+
                                     // Track the error
                                     val updatedErrors = _downloadErrors.value.toMutableMap()
                                     updatedErrors[entity.id] = errorMsg
@@ -279,7 +271,7 @@ class CampaignRepository @Inject constructor(
             val path = if (url.startsWith("/")) url else "/$url"
             "$domain$path"
         } else url
-        
+
         // Final sanity check for double slashes in path (excluding protocol)
         val finalUrl = normalized.replace(Regex("(?<!:)/{2,}"), "/")
         Log.d("Sync", "Normalized Media URL: $finalUrl")
@@ -291,9 +283,9 @@ class CampaignRepository @Inject constructor(
         val allCampaignsNow = cachedCampaigns.value
 
         val reportingSiteId = metadata.siteId.uppercase()
-        val siteCampaigns = allCampaignsNow.filter { 
+        val siteCampaigns = allCampaignsNow.filter {
             it.campaignTag.equals(reportingSiteId, ignoreCase = true) &&
-            it.startTime <= currentTime && it.endTime >= currentTime 
+                    it.startTime <= currentTime && it.endTime >= currentTime
         }
 
         val matchedCampaign = siteCampaigns.find { campaign ->
@@ -308,7 +300,10 @@ class CampaignRepository @Inject constructor(
         // 1b. RECOGNITION TRIGGER: If unrecognized title detected, attempt immediate sync to fetch new reference
         if (matchedCampaign == null && reportedTitle != "none" && reportedTitle != lastSyncAttemptedTitle) {
             lastSyncAttemptedTitle = reportedTitle
-            Log.d("Tracking", "Unrecognized title detected on $reportingSiteId: $reportedTitle. Attempting immediate reference sync.")
+            Log.d(
+                "Tracking",
+                "Unrecognized title detected on $reportingSiteId: $reportedTitle. Attempting immediate reference sync."
+            )
             CoroutineScope(Dispatchers.IO).launch {
                 syncCampaigns()
             }
@@ -333,8 +328,11 @@ class CampaignRepository @Inject constructor(
                 if (finishedCampaign != null) {
                     val durationSeconds = (currentTime - currentSession.startTime) / 1000L
                     if (durationSeconds >= 1L) { // report any visibility >= 1s
-                        Log.d("Tracking", "FINALIZING session for ${finishedCampaign.name} (${durationSeconds}s) on $reportingSiteId")
-                        
+                        Log.d(
+                            "Tracking",
+                            "FINALIZING session for ${finishedCampaign.name} (${durationSeconds}s) on $reportingSiteId"
+                        )
+
                         // LOG AUDIT TRAIL IMMEDIATELY (Before network calls)
                         val logId = trackingLogDao.insertLog(
                             TrackingLogEntity(
@@ -344,7 +342,7 @@ class CampaignRepository @Inject constructor(
                             )
                         )
                         Log.d("Tracking", "Audit Trail: Log entry created with ID $logId")
-                        
+
                         // SYNC TO CLOUD IMMEDIATELY
                         sendTrackingPulse(finishedCampaign, currentTime, locationString, durationSeconds, logId.toInt(), true)
                     } else {
@@ -371,11 +369,11 @@ class CampaignRepository @Inject constructor(
     }
 
     suspend fun trackCurrentCampaigns(currentTime: Long, locationString: String) {
-        val activeCampaigns = cachedCampaigns.value.filter { 
-            it.startTime <= currentTime && it.endTime >= currentTime 
+        val activeCampaigns = cachedCampaigns.value.filter {
+            it.startTime <= currentTime && it.endTime >= currentTime
         }
         val allMetadataMap = signalMonitor.allSourceMetadata.value
-        
+
         if (allMetadataMap.isEmpty()) {
             Log.d("Tracking", "No active source monitor link. Skipping background compliance tracking.")
             return
@@ -383,20 +381,20 @@ class CampaignRepository @Inject constructor(
 
         // Per-Site Targeted Compliance Tracking
         val activeSiteIds = activeCampaigns.map { it.campaignTag }.distinct()
-        
+
         activeSiteIds.forEach { siteId ->
             val metadata = allMetadataMap[siteId]
             val reportedTitle = metadata?.mediaTitle?.lowercase() ?: "none"
             val siteCampaigns = activeCampaigns.filter { it.campaignTag == siteId }
 
-            val rotationGracePeriod = 10 * 60 * 1000L 
+            val rotationGracePeriod = 10 * 60 * 1000L
             val suspensionThreshold = 20 * 60 * 1000L
 
             siteCampaigns.forEach { campaign ->
                 val fileName = campaign.sourceFilename?.lowercase() ?: ""
                 val campaignName = campaign.name.lowercase()
-                val isCurrentMatch = (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
-                                     reportedTitle.contains(campaignName)
+                val isCurrentMatch = (fileName.isNotEmpty() && reportedTitle.contains(fileName)) ||
+                        reportedTitle.contains(campaignName)
 
                 if (isCurrentMatch && reportedTitle != "none") {
                     campaignDao.updateLastSeenOnBillboardAt(campaign.id, currentTime)
@@ -410,7 +408,10 @@ class CampaignRepository @Inject constructor(
                     if ((isMissingFromRotation || isNewAndNotShowing) && timeSinceSeen < suspensionThreshold) {
                         // CRITICAL FIX: Only log rejected if we ARE receiving pulses for THIS SPECIFIC site
                         if (metadata != null && reportedTitle != "none") {
-                            Log.w("Tracking", "Compliance Rejected for ${campaign.name} on site $siteId. Billboard playing: $reportedTitle")
+                            Log.w(
+                                "Tracking",
+                                "Compliance Rejected for ${campaign.name} on site $siteId. Billboard playing: $reportedTitle"
+                            )
                             trackingLogDao.insertLog(
                                 TrackingLogEntity(
                                     campaignId = campaign.id,
@@ -447,11 +448,14 @@ class CampaignRepository @Inject constructor(
             val metadata = allMetadata[campaign.campaignTag] // TARGETED CHECK
             val reportedTitle = metadata?.mediaTitle?.lowercase() ?: ""
             val fileName = campaign.sourceFilename?.lowercase() ?: ""
-            val isMatch = (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
-                         reportedTitle.contains(campaign.name.lowercase())
-            
+            val isMatch = (fileName.isNotEmpty() && reportedTitle.contains(fileName)) ||
+                    reportedTitle.contains(campaign.name.lowercase())
+
             if (!isMatch || reportedTitle == "none") {
-                Log.d("Tracking", "Pulse rejected for ${campaign.name}: Content Mismatch or No Signal for Site ${campaign.campaignTag}")
+                Log.d(
+                    "Tracking",
+                    "Pulse rejected for ${campaign.name}: Content Mismatch or No Signal for Site ${campaign.campaignTag}"
+                )
                 return
             }
         }
@@ -462,7 +466,7 @@ class CampaignRepository @Inject constructor(
         val dayFormat = SimpleDateFormat("EEEE", Locale.getDefault())
         val hourFormat = SimpleDateFormat("HH", Locale.getDefault())
         val calendar = Calendar.getInstance().apply { time = now }
-        
+
         val weekDayNum = when (calendar.get(Calendar.DAY_OF_WEEK)) {
             Calendar.MONDAY -> "1"
             Calendar.TUESDAY -> "2"
@@ -494,7 +498,7 @@ class CampaignRepository @Inject constructor(
         try {
             Log.d("Tracking", "Syncing Spot to Cloud for ${campaign.name}...")
             val popResponse = api.sendProofOfPlay(popRequest)
-            
+
             // Fetch updated campaign to get new count for hourly sync
             val latestAll = campaignDao.getAllCampaigns().first()
             val updatedCampaign = latestAll.find { it.id == campaign.id } ?: campaign
@@ -524,7 +528,7 @@ class CampaignRepository @Inject constructor(
                 location = location,
                 uniqueID = updatedCampaign.id
             )
-            
+
             Log.d("Tracking", "Syncing Hourly Count to Cloud for ${campaign.name}...")
             val hourlyResp = api.trackHourly(hourlyRequest)
             if (hourlyResp.isSuccessful) {
@@ -568,7 +572,7 @@ class CampaignRepository @Inject constructor(
         campaignDao.clearAll()
         trackingLogDao.clearAll()
         mediaDownloader.clearMedia()
-        
+
         // Clear in-memory tracking state
         activeSessions.clear()
         lastPulseTime = 0L

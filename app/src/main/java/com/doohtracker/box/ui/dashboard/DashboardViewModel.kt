@@ -89,31 +89,19 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
         anyCampaignActive,
         campaignRepository.allCampaigns,
         signalMonitor.allSourceMetadata,
-        campaignRepository.deviceManager.isLocalMonitoringEnabledFlow,
-        campaignRepository.identities
-    ) { args ->
-        val linked = args[0] as Boolean
-        val anyActive = args[1] as Boolean
-        val all = args[2] as List<com.doohtracker.box.data.local.CampaignEntity>
-        val allMetadata = args[3] as Map<String, com.doohtracker.box.data.hardware.SourceMetadata>
-        val isLocalEnabled = args[4] as Boolean
-        val registeredIdentities = args[5] as List<Identity>
+        campaignRepository.deviceManager.isLocalMonitoringEnabledFlow
+    ) { linked, anyActive, all, allMetadata, isLocalEnabled ->
+        val metadata = allMetadata.values.firstOrNull()
 
-        val metadata = allMetadata.values.firstOrNull() 
-        val isReviewHub = registeredIdentities.any { id ->
-            (id.siteId.equals("#Retin-2029", ignoreCase = true) || id.siteId.equals("#Retin-7721", ignoreCase = true)) &&
-            id.username.equals("Ngonadi", ignoreCase = true)
-        }
-        
         when {
             linked -> {
                 val reportedTitle = metadata?.mediaTitle?.lowercase() ?: ""
                 val isLocal = metadata?.hostname == "Local-Android-System" || isLocalEnabled
-                
+
                 val hasContentMatchInSystem = all.any { campaign ->
                     val fileName = campaign.sourceFilename?.lowercase() ?: ""
-                    (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
-                    reportedTitle.contains(campaign.name.lowercase())
+                    (fileName.isNotEmpty() && reportedTitle.contains(fileName)) ||
+                            reportedTitle.contains(campaign.name.lowercase())
                 } && reportedTitle != "none"
 
                 if (hasContentMatchInSystem) {
@@ -124,8 +112,8 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
                     "Content Mismatch"
                 }
             }
+
             all.isNotEmpty() -> if (isLocalEnabled) "Waiting for Local Player..." else "Ready"
-            isReviewHub -> "Review Mode (Ready)"
             else -> "Inactive"
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Inactive")
@@ -140,57 +128,57 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     ) { registeredIdentities, allCampaigns, allMetadata, isDownloadingHubWide, seenAdsMap ->
         // Capture a stable timestamp for this calculation cycle
         val currentTime = timeProvider.getCurrentTimeMillis()
-        
+
         if (registeredIdentities.isEmpty()) {
             return@combine emptyList<IdentityUiModel>()
         }
-        
+
         registeredIdentities.map { identity ->
             val siteId = identity.siteId
-            val isReview = (siteId.equals("#Retin-2029", ignoreCase = true) || 
-                            siteId.equals("#Retin-7721", ignoreCase = true)) && 
-                           identity.username.equals("Ngonadi", ignoreCase = true)
 
             val identityCampaigns = allCampaigns.filter { it.campaignTag == siteId }
             val metadata = allMetadata[siteId]
-            
+
             // 1. Independent Downloading Logic:
             // A site is "Downloading" if it has active scheduled campaigns (EXCLUDING videos) missing their local files.
-            val hasMissingActiveFiles = identityCampaigns.any { 
+            val hasMissingActiveFiles = identityCampaigns.any {
                 val url = it.mediaUrl?.lowercase() ?: ""
                 val isVideo = it.mediaType?.lowercase() == "video" || url.endsWith(".mp4")
-                !isVideo && (isReview || (it.startTime <= currentTime && it.endTime >= currentTime)) && it.mediaUrl != null && it.localPath == null 
+                !isVideo && it.startTime <= currentTime && it.endTime >= currentTime && it.mediaUrl != null && it.localPath == null
             }
             val isDownloading = hasMissingActiveFiles || (identityCampaigns.isEmpty() && isDownloadingHubWide)
-            
+
             val reportedTitle = metadata?.mediaTitle?.lowercase() ?: ""
             val matchedCampaigns = identityCampaigns.filter { campaign ->
                 val fileName = campaign.sourceFilename?.lowercase() ?: ""
-                val isMatch = (fileName.isNotEmpty() && reportedTitle.contains(fileName)) || 
-                             reportedTitle.contains(campaign.name.lowercase())
-                
+                val isMatch = (fileName.isNotEmpty() && reportedTitle.contains(fileName)) ||
+                        reportedTitle.contains(campaign.name.lowercase())
+
                 // Dashboard Compliance: Only show "Active" if window is open
-                isMatch && (isReview || (campaign.startTime <= currentTime && campaign.endTime >= currentTime))
+                isMatch && campaign.startTime <= currentTime && campaign.endTime >= currentTime
             }.takeIf { reportedTitle != "none" && reportedTitle.isNotEmpty() } ?: emptyList()
 
             val isTimedOut = (currentTime - (metadata?.lastSeen ?: 0L)) > 15000
-            
+
             val status: String
             val statusColor: androidx.compose.ui.graphics.Color
-            
+
             when {
                 metadata == null || isTimedOut -> {
-                    status = if (isReview) "Review Active" else "Ready"
+                    status = "Ready"
                     statusColor = com.doohtracker.box.ui.theme.StatusCyan
                 }
+
                 matchedCampaigns.isNotEmpty() -> {
                     status = "Active"
                     statusColor = com.doohtracker.box.ui.theme.StatusGreen
                 }
+
                 reportedTitle == "none" || reportedTitle.isEmpty() -> {
                     status = "No Media"
                     statusColor = Color(0xFF87CEEB)
                 }
+
                 else -> {
                     status = "Content Mismatch"
                     statusColor = com.doohtracker.box.ui.theme.StatusYellow
@@ -199,12 +187,12 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
 
             val allAdsString = identityCampaigns.joinToString(" | ") { it.name }.ifEmpty { "No Ads Staged" }
             val scheduledAdsString = identityCampaigns
-                .filter { isReview || (it.startTime <= currentTime && it.endTime >= currentTime) }
+                .filter { it.startTime <= currentTime && it.endTime >= currentTime }
                 .joinToString(" | ") { it.name }
                 .ifEmpty { "No Scheduled Campaigns" }
 
             val siteSeenAds = seenAdsMap[siteId]?.keys?.toList() ?: emptyList()
-            
+
             IdentityUiModel(
                 siteId = siteId,
                 username = identity.username,
@@ -219,7 +207,7 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
                 mediaTitle = metadata?.mediaTitle ?: "NONE",
                 isMismatched = status == "Content Mismatch",
                 isDownloading = isDownloading,
-                campaigns = identityCampaigns.map { 
+                campaigns = identityCampaigns.map {
                     val url = it.mediaUrl?.lowercase() ?: ""
                     val isVideo = it.mediaType?.lowercase() == "video" || url.endsWith(".mp4")
                     // A campaign is "Verified/Ready" if it's a video OR if it has a local path
@@ -490,7 +478,7 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
     fun exportCampaignData(format: String, campaignId: String? = null, searchQuery: String? = null) {
         viewModelScope.launch {
             val allCampaigns = campaignRepository.allCampaigns.first()
-            
+
             val today = Calendar.getInstance().apply {
                 timeInMillis = timeProvider.getCurrentTimeMillis()
                 set(Calendar.HOUR_OF_DAY, 0)
@@ -504,11 +492,12 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
             // Filter campaigns based on user selection
             val filteredCampaigns = when {
                 campaignId != null -> allCampaigns.filter { it.id == campaignId }
-                !searchQuery.isNullOrBlank() && searchQuery != "All Campaigns" -> 
+                !searchQuery.isNullOrBlank() && searchQuery != "All Campaigns" ->
                     allCampaigns.filter { it.name.contains(searchQuery, ignoreCase = true) }
+
                 else -> allCampaigns
             }
-            
+
             val filteredCampaignIds = filteredCampaigns.map { it.id }.toSet()
             val filteredLogs = todayLogs.filter { it.campaignId in filteredCampaignIds }
 
@@ -526,7 +515,7 @@ class DashboardViewModel @androidx.annotation.OptIn(UnstableApi::class)
             val timestamp = timeProvider.getCurrentTimeMillis()
             val sdfDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
             val sdfTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-            
+
             val reportSuffix = when {
                 campaignId != null -> "_campaign_${campaignId}"
                 !searchQuery.isNullOrBlank() -> "_search_${searchQuery?.replace(" ", "_")}"
